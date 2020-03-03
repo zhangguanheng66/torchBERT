@@ -206,7 +206,7 @@ class MLMTask(nn.Module):
         super(MLMTask, self).__init__()
         self.bert_model = BertModel(ntoken, ninp, nhead, nhid, nlayers, dropout=0.5)
         self.mlm_head = nn.Linear(ninp, ntoken)
-        self.init_weights()
+        # self.init_weights()  # Stop init_weights to expand the searching space
 
     def init_weights(self):
         initrange = 0.1
