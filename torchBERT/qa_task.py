@@ -11,6 +11,30 @@ from metrics import compute_qa_exact, compute_qa_f1
 
 
 def pad_squad_data(batch):
+    # Fix sequence length to args.bptt with padding or trim
+    seq_list = []
+    ans_pos_list = []
+    tok_type = []
+
+    for item in batch:
+        qa_item = torch.cat((item['question'], item['context']))
+        if qa_item.size(0) > args.bptt:
+            qa_item = qa_item[:args.bptt]
+        elif qa_item.size(0) < args.bptt:
+            qa_item = torch.cat((qa_item,
+                                 torch.tensor([pad_id] * (args.bptt -
+                                              qa_item.size(0)))))
+        seq_list.append(qa_item)
+        ans_pos_list.append(item['ans_pos'] + item['question'].size(0))
+        tok_type.append(torch.cat((torch.zeros((item['question'].size(0))),
+                                   torch.ones((args.bptt -
+                                               item['question'].size(0))))))
+    return torch.stack(seq_list).long().t().contiguous().to(device), \
+        torch.stack(ans_pos_list).to(device), \
+        torch.stack(tok_type).long().t().contiguous().to(device)
+
+
+def pad_squad_data_context_first(batch):
     # Find max length of the mini-batch
     seq_list = []
     ans_pos_list = []
@@ -22,7 +46,6 @@ def pad_squad_data(batch):
             continue
         if item['context'].size(0) + item['question'].size(0) > args.bptt:
             item['context'] = item['context'][:(args.bptt - item['question'].size(0))]
-#            print("observe over-size sequence")
         if item['ans_pos'][1] >= item['context'].size(0):
             continue
         _batch.append(item)
@@ -40,8 +63,9 @@ def pad_squad_data(batch):
                                        torch.ones((max_l -
                                                    item['context'].size(0)))))
                             for item in _batch]).long().t().contiguous()
-#    print('padded.size()', padded.size())
-    return padded.to(device), torch.stack(ans_pos_list).to(device), tok_type.to(device)
+    return padded.to(device), \
+        torch.stack(ans_pos_list).to(device), \
+        tok_type.to(device)
 
 
 ###############################################################################
@@ -170,9 +194,9 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    ###############################################################################
+    ###################################################################
     # Load data
-    ###############################################################################
+    ###################################################################
 
     try:
         vocab = torch.load(args.save_vocab)
@@ -184,21 +208,35 @@ if __name__ == "__main__":
         with open(args.save_vocab, 'wb') as f:
             torch.save(vocab, f)
     pad_id = vocab.stoi['<pad>']
+
     train_dataset, dev_dataset = SQuAD(vocab=vocab)
+
+    # Remove data with 'question' + 'context' > args.bptt or
+    def clean_data(data):
+        _data = []
+        for item in data:
+            if item['ans_pos'][1] + item['question'].size(0) >= args.bptt:
+                continue
+            _data.append(item)
+        return _data
+    train_dataset.data = clean_data(train_dataset.data)
+    dev_dataset.data = clean_data(dev_dataset.data)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    ###############################################################################
+    ###################################################################
+    ###################################################################
     # Build the model
-    ###############################################################################
+    ###################################################################
 
     pretrained_bert = torch.load(args.bert_model)
     model = QuestionAnswerTask(pretrained_bert).to(device)
 
     criterion = nn.CrossEntropyLoss()
 
-    ###############################################################################
+    ###################################################################
     # Loop over epochs.
-    ###############################################################################
+    ###################################################################
 
     lr = args.lr
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
@@ -223,15 +261,15 @@ if __name__ == "__main__":
         else:
             scheduler.step()
 
-    ###############################################################################
+    ###################################################################
     # Load the best saved model.
-    ###############################################################################
+    ###################################################################
     with open(args.save, 'rb') as f:
         model = torch.load(f)
 
-    ###############################################################################
+    ###################################################################
     # Run on test data.
-    ###############################################################################
+    ###################################################################
     test_loss, test_exact, test_f1 = evaluate(dev_dataset)
     print('=' * 89)
     print('| End of training | test loss {:5.2f} | exact {:8.3f}% | f1 {:8.3f}%'.format(
