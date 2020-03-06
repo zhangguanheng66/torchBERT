@@ -251,8 +251,8 @@ if __name__ == "__main__":
             with open(args.save, 'wb') as f:
                 torch.save(model, f)
             best_val_loss = val_loss
-
-        scheduler.step()
+        else:
+            scheduler.step()
 
     ###############################################################################
     # Load the best saved model.
