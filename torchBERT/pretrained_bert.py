@@ -160,6 +160,8 @@ if __name__ == "__main__":
                         help='the fraction of masked tokens')
     parser.add_argument('--dataset', type=str, default='WikiText2',
                         help='dataset used for pretrained BERT model')
+    parser.add_argument('--parallel', type=str, default='None',
+                        help='Use DataParallel to train model')
     args = parser.parse_args()
 
     # Set the random seed manually for reproducibility.
@@ -223,7 +225,8 @@ if __name__ == "__main__":
 
     ntokens = len(train_dataset.get_vocab())
     model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
-    model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
+    if args.parallel == 'DataParallel':
+        model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
     criterion = nn.CrossEntropyLoss()
 
     ###############################################################################
@@ -270,6 +273,8 @@ if __name__ == "__main__":
     # Save the bert model layer
     ###############################################################################
     with open(args.save, 'wb') as f:
-        torch.save(model.module.bert_model, f)  # Wrap up by nn.DataParallel
-
+        if args.parallel == 'DataParallel':
+            torch.save(model.module.bert_model, f)  # Wrap up by nn.DataParallel
+        else:
+            torch.save(model.bert_model, f)
 # python main.py --seed 6868 --epochs 3 --emsize 256 --nhid 3072  --nlayers 12 --nhead 16 --save-vocab squad_vocab.pt
