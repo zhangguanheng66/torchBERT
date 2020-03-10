@@ -228,13 +228,14 @@ class NextSentenceTask(nn.Module):
         super(NextSentenceTask, self).__init__()
         self.bert_model = pretrained_bert
         self.ns_span = nn.Linear(pretrained_bert.ninp, 2)
+        self.activation = nn.Tanh()
 
     def forward(self, src, token_type_input=None):
         output = self.bert_model(src, token_type_input)
 
         # Send the first <'cls'> seq to a classifier
         output = self.ns_span(output[0])
-        return output
+        return self.activation(output)
 
 
 class QuestionAnswerTask(nn.Module):
