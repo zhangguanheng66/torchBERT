@@ -65,7 +65,7 @@ def evaluate(data_source):
             output = torch.stack([output[i] for i in range(lm_mask.size(0)) if lm_mask[i]])
             output_flat = output.view(-1, ntokens)
             total_loss += len(data) * criterion(output_flat, targets).item()
-    return total_loss / (len(data_source) - 1)
+    return total_loss / ((len(data_source) - 1) / args.batch_size)
 
 
 def train():
@@ -214,10 +214,9 @@ if __name__ == "__main__":
         test_dataset, valid_dataset = torchtext.experimental.datasets.WikiText2(vocab=vocab, data_select=('test', 'valid'))
         train_dataset, = WLMDataset(vocab=vocab, data_select='train')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    eval_batch_size = 10
     train_data = batchify(train_dataset.data, args.batch_size)
-    val_data = batchify(valid_dataset.data, eval_batch_size)
-    test_data = batchify(test_dataset.data, eval_batch_size)
+    val_data = batchify(valid_dataset.data, args.batch_size)
+    test_data = batchify(test_dataset.data, args.batch_size)
 
     ###############################################################################
     # Build the model
