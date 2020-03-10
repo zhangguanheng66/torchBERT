@@ -45,6 +45,7 @@ def evaluate(data_source):
     model.eval()
     total_loss = 0.
     mask_id = train_dataset.vocab.stoi['<MASK>']
+    cls_id = train_dataset.vocab.stoi['<cls>']
     with torch.no_grad():
         for i in range(0, data_source.size(0) - 1, args.bptt):
             data = get_batch(data_source, i)
@@ -54,7 +55,11 @@ def evaluate(data_source):
             ones_num = int(data_len * args.mask_frac)
             zeros_num = data_len - ones_num
             lm_mask = torch.cat([torch.zeros(zeros_num), torch.ones(ones_num)])
-            lm_mask = lm_mask[torch.randperm(data_len)].to(device)
+            lm_mask = lm_mask[torch.randperm(data_len)]
+
+            # Add <'cls'> token id to the beginning of seq across batches
+            data = torch.cat((torch.tensor([[cls_id] * data.size(1)]).long().to(device), data))
+            lm_mask = torch.cat((torch.tensor([0.0]), lm_mask)).to(device)
 
             targets = torch.stack([data[i] for i in range(lm_mask.size(0)) if lm_mask[i]]).view(-1)
             data = data.masked_fill(lm_mask.bool().unsqueeze(1), mask_id)
@@ -74,6 +79,7 @@ def train():
     total_loss = 0.
     start_time = time.time()
     mask_id = train_dataset.vocab.stoi['<MASK>']
+    cls_id = train_dataset.vocab.stoi['<cls>']
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
 
         data = get_batch(train_data, i)
@@ -83,7 +89,11 @@ def train():
         ones_num = int(data_len * args.mask_frac)
         zeros_num = data_len - ones_num
         lm_mask = torch.cat([torch.zeros(zeros_num), torch.ones(ones_num)])
-        lm_mask = lm_mask[torch.randperm(data_len)].to(device)
+        lm_mask = lm_mask[torch.randperm(data_len)]
+
+        # Add <'cls'> token id to the beginning of seq across batches
+        data = torch.cat((torch.tensor([[cls_id] * data.size(1)]).long().to(device), data))
+        lm_mask = torch.cat((torch.tensor([0.0]), lm_mask)).to(device)
 
         targets = torch.stack([data[i] for i in range(lm_mask.size(0)) if lm_mask[i]]).view(-1)
         data = data.masked_fill(lm_mask.bool().unsqueeze(1), mask_id)

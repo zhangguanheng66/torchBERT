@@ -221,6 +221,22 @@ class MLMTask(nn.Module):
         return output.transpose(0, 1)  # Wrap up by nn.DataParallel
 
 
+class NextSentenceTask(nn.Module):
+    """Contain a pretrain BERT model and a linear layer."""
+
+    def __init__(self, pretrained_bert):
+        super(NextSentenceTask, self).__init__()
+        self.bert_model = pretrained_bert
+        self.ns_span = nn.Linear(pretrained_bert.ninp, 2)
+
+    def forward(self, src, token_type_input=None):
+        output = self.bert_model(src, token_type_input)
+
+        # Send the first <'cls'> seq to a classifier
+        output = self.ns_span(output[0])
+        return output
+
+
 class QuestionAnswerTask(nn.Module):
     """Contain a pretrain BERT model and a linear layer."""
 
