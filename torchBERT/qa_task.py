@@ -17,7 +17,8 @@ def pad_squad_data(batch):
     tok_type = []
 
     for item in batch:
-        qa_item = torch.cat((item['question'], item['context']))
+        qa_item = torch.cat((item['question'], torch.tensor([sep_id]),
+                             item['context'], torch.tensor([sep_id])))
         if qa_item.size(0) > args.bptt:
             qa_item = qa_item[:args.bptt]
         elif qa_item.size(0) < args.bptt:
@@ -25,10 +26,10 @@ def pad_squad_data(batch):
                                  torch.tensor([pad_id] * (args.bptt -
                                               qa_item.size(0)))))
         seq_list.append(qa_item)
-        ans_pos_list.append(item['ans_pos'] + item['question'].size(0))
-        tok_type.append(torch.cat((torch.zeros((item['question'].size(0))),
+        ans_pos_list.append(item['ans_pos'] + item['question'].size(0) + 1)  # 1 for sep
+        tok_type.append(torch.cat((torch.zeros((item['question'].size(0) + 1)),
                                    torch.ones((args.bptt -
-                                               item['question'].size(0))))))
+                                               item['question'].size(0) - 1)))))
     return torch.stack(seq_list).long().t().contiguous().to(device), \
         torch.stack(ans_pos_list).to(device), \
         torch.stack(tok_type).long().t().contiguous().to(device)
@@ -150,6 +151,7 @@ def train():
         target_start_pos = target_start_pos.squeeze(-1)
         target_end_pos = target_end_pos.squeeze(-1)
 
+#        print('start_pos, target_start_pos, end_pos, target_end_pos', start_pos, target_start_pos, end_pos, target_end_pos)
         loss = (criterion(start_pos, target_start_pos) + criterion(end_pos, target_end_pos)) / 2
         loss.backward()
 
@@ -220,6 +222,7 @@ if __name__ == "__main__":
         with open(args.save_vocab, 'wb') as f:
             torch.save(vocab, f)
     pad_id = vocab.stoi['<pad>']
+    sep_id = vocab.stoi['<sep>']
 
     train_dataset, dev_dataset = SQuAD(vocab=vocab)
 
@@ -227,7 +230,7 @@ if __name__ == "__main__":
     def clean_data(data):
         _data = []
         for item in data:
-            if item['ans_pos'][1] + item['question'].size(0) >= args.bptt:
+            if item['ans_pos'][1] + item['question'].size(0) + 2 >= args.bptt: # 2 for '<cls>' '<sep>'
                 continue
             _data.append(item)
         return _data

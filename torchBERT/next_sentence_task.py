@@ -38,7 +38,7 @@ def pad_next_sentence_data(batch):
     tok_type = []
     same_sentence_labels = []
     for item in batch:
-        qa_item = torch.tensor(item[0] + item[1])
+        qa_item = torch.tensor(item[0] + [sep_id] + item[1] + [sep_id])
         if qa_item.size(0) > args.bptt:
             qa_item = qa_item[:args.bptt]
         elif qa_item.size(0) < args.bptt:
@@ -47,7 +47,7 @@ def pad_next_sentence_data(batch):
                                               qa_item.size(0)))))
         seq_list.append(qa_item)
         _tok_tp = torch.ones((qa_item.size(0)))
-        _idx = min(len(item[0]), args.bptt)
+        _idx = min(len(item[0]) + 1, args.bptt)
         _tok_tp[:_idx] = 0.0
         tok_type.append(_tok_tp)
         same_sentence_labels.append(item[2])
@@ -98,18 +98,18 @@ def train():
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                             collate_fn=pad_next_sentence_data)
     cls_id = train_dataset.vocab.stoi['<cls>']
-    # softmax = torch.nn.Softmax(dim=-1) # print
+#    softmax = torch.nn.Softmax(dim=-1) # print
 
     for idx, (seq_input, tok_type, target_ns_labels) in enumerate(dataloader):
         # Add <'cls'> token id to the beginning of seq across batches
         seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
         tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
-        # print('seq_input.size(), seq_input, tok_type.size(), tok_type', seq_input.size(), seq_input, tok_type.size(), tok_type)
+#        print('seq_input.size(), seq_input, tok_type.size(), tok_type', seq_input.size(), seq_input, tok_type.size(), tok_type)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         optimizer.zero_grad()
         ns_labels = model(seq_input, token_type_input=tok_type)
-        # print("batch, softmax(ns_labels).argmax(1), target_ns_labels", idx, softmax(ns_labels).argmax(1), target_ns_labels)
+#        print("batch, softmax(ns_labels).argmax(1), target_ns_labels", idx, softmax(ns_labels).argmax(1), target_ns_labels)
         loss = criterion(ns_labels, target_ns_labels)
         loss.backward()
 
@@ -182,6 +182,7 @@ if __name__ == "__main__":
         with open(args.save_vocab, 'wb') as f:
             torch.save(vocab, f)
     pad_id = vocab.stoi['<pad>']
+    sep_id = vocab.stoi['<sep>']
 
     train_dataset, valid_dataset, test_dataset = WikiText103(vocab=vocab,
                                                              single_line=False)

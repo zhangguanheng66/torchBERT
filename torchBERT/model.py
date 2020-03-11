@@ -228,15 +228,18 @@ class NextSentenceTask(nn.Module):
         super(NextSentenceTask, self).__init__()
         self.bert_model = pretrained_bert
         self.ns_span = nn.Linear(pretrained_bert.ninp, 2)
-        self.activation = F.relu
-#        self.activation = nn.Tanh()
+        self.activation = nn.Tanh()
 
     def forward(self, src, token_type_input=None):
         output = self.bert_model(src, token_type_input)
 
         # Send the first <'cls'> seq to a classifier
-        output = self.ns_span(output[0])
-        return self.activation(output)
+#        print('output[0].size()', output[0].size(), output[0])
+        output = self.activation(output[0])
+        output = self.ns_span(output)
+#        print('output.size()', output.size(), output)
+#        print('self.activation(output).size()', self.activation(output).size(), self.activation(output))
+        return output
 
 
 class QuestionAnswerTask(nn.Module):
