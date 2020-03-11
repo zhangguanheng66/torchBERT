@@ -87,7 +87,7 @@ def evaluate(data_source):
         for idx, (seq_input, ans_pos, tok_type) in enumerate(dataloader):
             # Add <'cls'> token id to the beginning of seq across batches
             seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-            tok_type = torch.cat((torch.tensor([[cls_id] * tok_type.size(1)]).long().to(device), tok_type))
+            tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
             ans_pos = ans_pos + 1
 
             start_pos, end_pos = model(seq_input, token_type_input=tok_type)
@@ -138,7 +138,7 @@ def train():
     for idx, (seq_input, ans_pos, tok_type) in enumerate(dataloader):
         # Add <'cls'> token id to the beginning of seq across batches
         seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-        tok_type = torch.cat((torch.tensor([[cls_id] * tok_type.size(1)]).long().to(device), tok_type))
+        tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
         ans_pos = ans_pos + 1
 
         # Starting each batch, we detach the hidden state from how it was previously produced.

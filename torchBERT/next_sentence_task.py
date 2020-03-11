@@ -25,8 +25,10 @@ def generate_next_sentence_data(whole_data):
     num_shuffle = int(len(processed_data) * args.frac_ns)
     shuffle_zip = list(zip(shuffle_idx1, shuffle_idx2))[:num_shuffle]
     for (i, j) in shuffle_zip:
+#        print('old', generate_text(processed_data[i][0]), generate_text(processed_data[i][1]), generate_text(processed_data[j][0]), processed_data[i][2])
         processed_data[i][1] = processed_data[j][0]
         processed_data[i][2] = int(0)  # Switch same sentence label to false 0
+#        print('new', generate_text(processed_data[i][0]), generate_text(processed_data[i][1]), generate_text(processed_data[j][0]), processed_data[i][2])
     return processed_data
 
 
@@ -52,7 +54,7 @@ def pad_next_sentence_data(batch):
 
     return torch.stack(seq_list).long().t().contiguous().to(device), \
         torch.stack(tok_type).long().t().contiguous().to(device), \
-        torch.tensor(same_sentence_labels).long().t().contiguous().to(device)
+        torch.tensor(same_sentence_labels).long().contiguous().to(device)
 
 
 ###############################################################################
@@ -72,7 +74,7 @@ def evaluate(data_source):
         for idx, (seq_input, tok_type, target_ns_labels) in enumerate(dataloader):
             # Add <'cls'> token id to the beginning of seq across batches
             seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-            tok_type = torch.cat((torch.tensor([[cls_id] * tok_type.size(1)]).long().to(device), tok_type))
+            tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
 
             ns_labels = model(seq_input, token_type_input=tok_type)
             #print('ns_labels.size(), target_ns_labels.size()', ns_labels.size(), target_ns_labels.size())
@@ -101,8 +103,8 @@ def train():
     for idx, (seq_input, tok_type, target_ns_labels) in enumerate(dataloader):
         # Add <'cls'> token id to the beginning of seq across batches
         seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-        tok_type = torch.cat((torch.tensor([[cls_id] * tok_type.size(1)]).long().to(device), tok_type))
-
+        tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
+        # print('seq_input.size(), seq_input, tok_type.size(), tok_type', seq_input.size(), seq_input, tok_type.size(), tok_type)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         optimizer.zero_grad()

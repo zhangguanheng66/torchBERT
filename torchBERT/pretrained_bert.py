@@ -69,8 +69,8 @@ def evaluate(data_source):
             output = output.transpose(0, 1)  # Wrap up by nn.DataParallel
             output = torch.stack([output[i] for i in range(lm_mask.size(0)) if lm_mask[i]])
             output_flat = output.view(-1, ntokens)
-            total_loss += len(data) * criterion(output_flat, targets).item()
-    return total_loss / ((len(data_source) - 1) / args.batch_size)
+            total_loss += criterion(output_flat, targets).item()
+    return total_loss / ((len(data_source) - 1) / args.bptt)
 
 
 def train():
