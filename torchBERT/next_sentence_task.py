@@ -152,7 +152,7 @@ if __name__ == "__main__":
                         help='random seed')
     parser.add_argument('--cuda', action='store_true',
                         help='use CUDA')
-    parser.add_argument('--log-interval', type=int, default=200, metavar='N',
+    parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='report interval')
     parser.add_argument('--save', type=str, default='ns_model.pt',
                         help='path to save the final model')
