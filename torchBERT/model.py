@@ -96,9 +96,6 @@ class MultiheadAttentionOutProjection(nn.Module):
             "batch size times the number of heads not equal to attn_output[0]"
         attn_output = torch.reshape(attn_output.transpose(0, 1),
                                     (tgt_len, bsz, self.embed_dim))
-        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len,
-                                                                    bsz,
-                                                                    self.embed_dim)
         return self.linear(attn_output)
 
 
