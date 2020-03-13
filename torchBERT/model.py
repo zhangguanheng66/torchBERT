@@ -227,6 +227,8 @@ class NextSentenceTask(nn.Module):
     def __init__(self, pretrained_bert):
         super(NextSentenceTask, self).__init__()
         self.bert_model = pretrained_bert
+        self.linear_layer = nn.Linear(pretrained_bert.ninp,
+                                      pretrained_bert.ninp)
         self.ns_span = nn.Linear(pretrained_bert.ninp, 2)
         self.activation = nn.Tanh()
 
@@ -235,7 +237,7 @@ class NextSentenceTask(nn.Module):
 
         # Send the first <'cls'> seq to a classifier
 #        print('output[0].size()', output[0].size(), output[0])
-        output = self.activation(output[0])
+        output = self.activation(self.linear_layer(output[0]))
         output = self.ns_span(output)
 #        print('output.size()', output.size(), output)
 #        print('self.activation(output).size()', self.activation(output).size(), self.activation(output))
