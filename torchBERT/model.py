@@ -1,4 +1,3 @@
-import math
 import copy
 import torch
 import torch.nn as nn
@@ -6,40 +5,37 @@ import torch.nn.functional as F
 from torch.nn import ModuleList, Linear, Dropout, LayerNorm
 
 
-# Temporarily leave PositionalEncoding module here. Will be moved somewhere else.
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
+    def __init__(self, d_model, max_len=5000):
         super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
+        self.pos_embedding = nn.Embedding(max_len, d_model)
 
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0,
-                                          d_model,
-                                          2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        self.register_buffer('pe', pe)
+    def init_weights(self):
+        self.pos_embedding.weight.data.normal_(mean=0.0, std=0.02)
 
     def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
-        return self.dropout(x)
+        S, N = x.size()
+        pos = torch.arange(S,
+                           dtype=torch.long,
+                           device=x.device).unsqueeze(0).expand((N, S)).t()
+        return self.pos_embedding(pos)
 
 
 class TokenTypeEncoding(nn.Module):
-    def __init__(self, ntoken, ninp):
+    def __init__(self, type_token_num, d_model):
         super(TokenTypeEncoding, self).__init__()
-        self.token_type_embeddings = nn.Embedding(ntoken, ninp)
-        self.ntoken = ntoken
-        self.ninp = ninp
+        self.token_type_embeddings = nn.Embedding(type_token_num, d_model)
 
-    def forward(self, seq_input, token_type_input=None):
-        S, N, E = seq_input.size()
+    def init_weights(self):
+        self.token_type_embeddings.weight.data.normal_(mean=0.0, std=0.02)
+
+    def forward(self, seq_input, token_type_input):
+        S, N = seq_input.size()
         if token_type_input is None:
             token_type_input = torch.zeros((S, N),
-                                           dtype=torch.long, device=seq_input.device)
-        return seq_input + self.token_type_embeddings(token_type_input)
+                                           dtype=torch.long,
+                                           device=seq_input.device)
+        return self.token_type_embeddings(token_type_input)
 
 
 class MultiheadAttentionInProjection(nn.Module):
@@ -175,7 +171,8 @@ class TransformerEncoder(nn.Module):
         output = src
 
         for mod in self.layers:
-            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
+            output = mod(output, src_mask=mask,
+                         src_key_padding_mask=src_key_padding_mask)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -188,18 +185,21 @@ class BertEmbedding(nn.Module):
         super(BertEmbedding, self).__init__()
         self.ninp = ninp
         self.ntoken = ntoken
-        self.pos_embed = PositionalEncoding(ninp, dropout)
+        self.pos_embed = PositionalEncoding(ninp)
         self.embed = nn.Embedding(ntoken, ninp)
-        self.tok_type_embed = TokenTypeEncoding(ntoken, ninp)
+        self.tok_type_embed = TokenTypeEncoding(2, ninp)  # Two sentence type
+        self.norm = LayerNorm(ninp)
+        self.dropout = Dropout(dropout)
 
     def init_weights(self):
         self.embed.weight.data.normal_(mean=0.0, std=0.02)
+        self.pos_embed.init_weights()
+        self.tok_type_embed.init_weights()
 
-    def forward(self, src, token_type_input=None):
-        src = self.embed(src) * math.sqrt(self.ninp)
-        src = self.pos_embed(src)
-        src = self.tok_type_embed(src, token_type_input)
-        return src
+    def forward(self, src, token_type_input):
+        src = self.embed(src) + self.pos_embed(src) \
+            + self.tok_type_embed(src, token_type_input)
+        return self.dropout(self.norm(src))
 
 
 class BertModel(nn.Module):
@@ -218,7 +218,7 @@ class BertModel(nn.Module):
         self.bert_embed.init_weights()
         self.transformer_encoder.init_weights()
 
-    def forward(self, src, token_type_input=None):
+    def forward(self, src, token_type_input):
         src = self.bert_embed(src, token_type_input)
         output = self.transformer_encoder(src)
         return output
@@ -256,7 +256,7 @@ class NextSentenceTask(nn.Module):
         self.ns_span = nn.Linear(pretrained_bert.ninp, 2)
         self.activation = nn.Tanh()
 
-    def forward(self, src, token_type_input=None):
+    def forward(self, src, token_type_input):
         output = self.bert_model(src, token_type_input)
 
         # Send the first <'cls'> seq to a classifier
@@ -276,7 +276,7 @@ class QuestionAnswerTask(nn.Module):
         self.pretrained_bert = pretrained_bert
         self.qa_span = nn.Linear(pretrained_bert.ninp, 2)
 
-    def forward(self, src, token_type_input=None):
+    def forward(self, src, token_type_input):
         output = self.pretrained_bert(src, token_type_input)
         # transpose output (S, N, E) to (N, S, E)
         output = output.transpose(0, 1)
