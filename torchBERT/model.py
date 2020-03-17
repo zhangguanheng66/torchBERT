@@ -54,6 +54,11 @@ class MultiheadAttentionInProjection(nn.Module):
         self.fc_k = nn.Linear(embed_dim, self.kdim)  # key
         self.fc_v = nn.Linear(embed_dim, self.vdim)  # value
 
+    def init_weights(self):
+        self.fc_q.weight.data.normal_(mean=0.0, std=0.02)
+        self.fc_k.weight.data.normal_(mean=0.0, std=0.02)
+        self.fc_v.weight.data.normal_(mean=0.0, std=0.02)
+
     def forward(self, query, key, value):
         tgt_len, bsz, embed_dim = query.size(0), query.size(1), query.size(2)
 
@@ -94,6 +99,9 @@ class MultiheadAttentionOutProjection(nn.Module):
         self.num_heads = num_heads
         self.linear = nn.Linear(embed_dim, embed_dim)
 
+    def init_weights(self):
+        self.linear.weight.data.normal_(mean=0.0, std=0.02)
+
     def forward(self, attn_output):
         batch_heads, tgt_len = attn_output.size(0), attn_output.size(1)
         bsz = batch_heads // self.num_heads
@@ -128,10 +136,15 @@ class TransformerEncoderLayer(nn.Module):
         else:
             raise RuntimeError("only relu/gelu are supported, not {}".format(activation))
 
-    def __setstate__(self, state):
-        if 'activation' not in state:
-            state['activation'] = F.relu
-        super(TransformerEncoderLayer, self).__setstate__(state)
+    def init_weights(self):
+        self.attn_in_proj.init_weights()
+        self.attn_out_proj.init_weights()
+        self.linear1.weight.data.normal_(mean=0.0, std=0.02)
+        self.linear2.weight.data.normal_(mean=0.0, std=0.02)
+        self.norm1.bias.data.zero_()
+        self.norm1.weight.data.fill_(1.0)
+        self.norm2.bias.data.zero_()
+        self.norm2.weight.data.fill_(1.0)
 
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
         query, key, value = self.attn_in_proj(src, src, src)
@@ -154,6 +167,10 @@ class TransformerEncoder(nn.Module):
         self.num_layers = num_layers
         self.norm = norm
 
+    def init_weights(self):
+        for mod in self.layers:
+            mod.init_weights()
+
     def forward(self, src, mask=None, src_key_padding_mask=None):
         output = src
 
@@ -175,6 +192,9 @@ class BertEmbedding(nn.Module):
         self.embed = nn.Embedding(ntoken, ninp)
         self.tok_type_embed = TokenTypeEncoding(ntoken, ninp)
 
+    def init_weights(self):
+        self.embed.weight.data.normal_(mean=0.0, std=0.02)
+
     def forward(self, src, token_type_input=None):
         src = self.embed(src) * math.sqrt(self.ninp)
         src = self.pos_embed(src)
@@ -192,6 +212,11 @@ class BertModel(nn.Module):
         encoder_layers = TransformerEncoderLayer(ninp, nhead, nhid, dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
         self.ninp = ninp
+        self.init_weights()
+
+    def init_weights(self):
+        self.bert_embed.init_weights()
+        self.transformer_encoder.init_weights()
 
     def forward(self, src, token_type_input=None):
         src = self.bert_embed(src, token_type_input)
@@ -209,13 +234,6 @@ class MLMTask(nn.Module):
         self.activation = F.gelu
         self.norm_layer = torch.nn.LayerNorm(ninp, eps=1e-12)
         self.mlm_head = nn.Linear(ninp, ntoken)
-        # self.init_weights()  # Stop init_weights to expand the searching space
-
-    def init_weights(self):
-        initrange = 0.1
-        self.bert_model.bert_embed.embed.weight.data.uniform_(-initrange, initrange)
-        self.mlm_head.bias.data.zero_()
-        self.mlm_head.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, src, token_type_input=None):
         src = src.transpose(0, 1)  # Wrap up by nn.DataParallel
