@@ -158,7 +158,7 @@ if __name__ == "__main__":
                         help='use CUDA')
     parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='report interval')
-    parser.add_argument('--save', type=str, default='model.pt',
+    parser.add_argument('--save', type=str, default='bert_model.pt',
                         help='path to save the final model')
     parser.add_argument('--save-vocab', type=str, default='vocab.pt',
                         help='path to save the vocab')
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     parser.add_argument('--mask_frac', type=float, default=0.15,
                         help='the fraction of masked tokens')
     parser.add_argument('--dataset', type=str, default='WikiText2',
-                        help='dataset used for pretrained BERT model')
+                        help='dataset used for MLM task')
     parser.add_argument('--parallel', type=str, default='None',
                         help='Use DataParallel to train model')
     args = parser.parse_args()
@@ -206,7 +206,7 @@ if __name__ == "__main__":
     elif args.dataset == 'WMTNewsCrawl':
         from data import WMTNewsCrawl as WLMDataset
     else:
-        print("dataset for pretrained BERT is not supported")
+        print("dataset for MLM task is not supported")
 
     try:
         vocab = torch.load(args.save_vocab)
