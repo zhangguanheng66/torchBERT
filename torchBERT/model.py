@@ -107,7 +107,7 @@ class MultiheadAttentionOutProjection(nn.Module):
 
 class TransformerEncoderLayer(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048,
-                 dropout=0.1, activation="relu"):
+                 dropout=0.1, activation="gelu"):
         super(TransformerEncoderLayer, self).__init__()
         self.attn_in_proj = MultiheadAttentionInProjection(d_model, nhead)
         self.scaled_dot_product = ScaledDotProduct(dropout=dropout)
