@@ -205,6 +205,9 @@ class MLMTask(nn.Module):
     def __init__(self, ntoken, ninp, nhead, nhid, nlayers, dropout=0.5):
         super(MLMTask, self).__init__()
         self.bert_model = BertModel(ntoken, ninp, nhead, nhid, nlayers, dropout=0.5)
+        self.mlm_span = nn.Linear(ninp, ninp)
+        self.activation = F.gelu
+        self.norm_layer = torch.nn.LayerNorm(ninp, eps=1e-12)
         self.mlm_head = nn.Linear(ninp, ntoken)
         # self.init_weights()  # Stop init_weights to expand the searching space
 
@@ -217,6 +220,9 @@ class MLMTask(nn.Module):
     def forward(self, src, token_type_input=None):
         src = src.transpose(0, 1)  # Wrap up by nn.DataParallel
         output = self.bert_model(src, token_type_input)
+        output = self.mlm_span(output)
+        output = self.activation(output)
+        output = self.norm_layer(output)
         output = self.mlm_head(output)
         return output.transpose(0, 1)  # Wrap up by nn.DataParallel
 
