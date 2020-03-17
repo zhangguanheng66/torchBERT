@@ -81,6 +81,7 @@ def train():
     start_time = time.time()
     mask_id = train_dataset.vocab.stoi['<MASK>']
     cls_id = train_dataset.vocab.stoi['<cls>']
+    train_loss_log.append(0.0)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
 
         data = get_batch(train_data, i)
@@ -118,7 +119,7 @@ def train():
 
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
-            train_loss_log.append(cur_loss)
+            train_loss_log[-1] = cur_loss
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | '
                   'loss {:5.2f} | ppl {:8.2f}'.format(
@@ -280,7 +281,7 @@ if __name__ == "__main__":
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_loss, math.exp(test_loss)))
     print('=' * 89)
-    print_loss_log(train_loss_log, val_loss_log, test_loss)
+    print_loss_log('mlm_loss.txt', train_loss_log, val_loss_log, test_loss)
 
     ###############################################################################
     # Save the bert model layer

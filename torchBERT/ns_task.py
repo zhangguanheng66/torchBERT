@@ -97,6 +97,7 @@ def train():
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                             collate_fn=pad_next_sentence_data)
     cls_id = train_dataset.vocab.stoi['<cls>']
+    train_loss_log.append(0.0)
 #    softmax = torch.nn.Softmax(dim=-1) # print
 
     for idx, (seq_input, tok_type, target_ns_labels) in enumerate(dataloader):
@@ -121,7 +122,7 @@ def train():
 
         if idx % args.log_interval == 0 and idx > 0:
             cur_loss = total_loss / args.log_interval
-            train_loss_log.append(cur_loss)
+            train_loss_log[-1] = cur_loss
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | '
                   'ms/batch {:5.2f} | '
@@ -245,7 +246,7 @@ if __name__ == "__main__":
     print('| End of training | test loss {:8.5f}'.format(
         test_loss))
     print('=' * 89)
-    print_loss_log(train_loss_log, val_loss_log, test_loss)
+    print_loss_log('ns_loss.txt', train_loss_log, val_loss_log, test_loss)
 
     with open(args.save, 'wb') as f:
         torch.save(model.bert_model, f)

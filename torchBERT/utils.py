@@ -1,5 +1,5 @@
-def print_loss_log(train_loss, val_loss, test_loss):
-    with open('mlm_loss.txt', 'w') as f:
+def print_loss_log(file_name, train_loss, val_loss, test_loss):
+    with open(file_name, 'w') as f:
         for idx in range(len(train_loss)):
             f.write('epoch {:3d} | train loss {:8.5f}'.format(idx + 1,
                                                               train_loss[idx]) + '\n')

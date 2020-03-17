@@ -136,6 +136,7 @@ def train():
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                             collate_fn=pad_squad_data)
     cls_id = train_dataset.vocab.stoi['<cls>']
+    train_loss_log.append(0.0)
 
     for idx, (seq_input, ans_pos, tok_type) in enumerate(dataloader):
         # Add <'cls'> token id to the beginning of seq across batches
@@ -165,7 +166,7 @@ def train():
 
         if idx % args.log_interval == 0 and idx > 0:
             cur_loss = total_loss / args.log_interval
-            train_loss_log.append(cur_loss)
+            train_loss_log[-1] = cur_loss
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | '
                   'ms/batch {:5.2f} | '
@@ -294,7 +295,7 @@ if __name__ == "__main__":
     print('| End of training | test loss {:5.2f} | exact {:8.3f}% | f1 {:8.3f}%'.format(
         test_loss, test_exact, test_f1))
     print('=' * 89)
-    print_loss_log(train_loss_log, val_loss_log, test_loss)
+    print_loss_log('qa_loss.txt', train_loss_log, val_loss_log, test_loss)
 
     with open('fine_tuning_qa_model.pt', 'wb') as f:
         torch.save(model, f)
