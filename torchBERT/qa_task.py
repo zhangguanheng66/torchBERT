@@ -8,6 +8,7 @@ import torchtext
 from data import SQuAD
 from model import QuestionAnswerTask
 from metrics import compute_qa_exact, compute_qa_f1
+from utils import print_loss_log
 
 
 def pad_squad_data(batch):
@@ -164,6 +165,7 @@ def train():
 
         if idx % args.log_interval == 0 and idx > 0:
             cur_loss = total_loss / args.log_interval
+            train_loss_log.append(cur_loss)
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | '
                   'ms/batch {:5.2f} | '
@@ -257,11 +259,13 @@ if __name__ == "__main__":
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
     best_val_f1 = None
+    train_loss_log, val_loss_log = [], []
 
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train()
         val_loss, val_exact, val_f1 = evaluate(dev_dataset)
+        val_loss_log.append(val_loss)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
               'exact {:8.3f}% | '
@@ -290,6 +294,7 @@ if __name__ == "__main__":
     print('| End of training | test loss {:5.2f} | exact {:8.3f}% | f1 {:8.3f}%'.format(
         test_loss, test_exact, test_f1))
     print('=' * 89)
+    print_loss_log(train_loss_log, val_loss_log, test_loss)
 
     with open('fine_tuning_qa_model.pt', 'wb') as f:
         torch.save(model, f)

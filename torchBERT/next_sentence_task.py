@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 import torchtext
 from data import WikiText103
 from model import NextSentenceTask
+from utils import print_loss_log
 
 
 def generate_next_sentence_data(whole_data):
@@ -25,10 +26,8 @@ def generate_next_sentence_data(whole_data):
     num_shuffle = int(len(processed_data) * args.frac_ns)
     shuffle_zip = list(zip(shuffle_idx1, shuffle_idx2))[:num_shuffle]
     for (i, j) in shuffle_zip:
-#        print('old', generate_text(processed_data[i][0]), generate_text(processed_data[i][1]), generate_text(processed_data[j][0]), processed_data[i][2])
         processed_data[i][1] = processed_data[j][0]
         processed_data[i][2] = int(0)  # Switch same sentence label to false 0
-#        print('new', generate_text(processed_data[i][0]), generate_text(processed_data[i][1]), generate_text(processed_data[j][0]), processed_data[i][2])
     return processed_data
 
 
@@ -122,6 +121,7 @@ def train():
 
         if idx % args.log_interval == 0 and idx > 0:
             cur_loss = total_loss / args.log_interval
+            train_loss_log.append(cur_loss)
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | '
                   'ms/batch {:5.2f} | '
@@ -210,11 +210,13 @@ if __name__ == "__main__":
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
     best_val_loss = None
+    train_loss_log, val_loss_log = [], []
 
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train()
         val_loss = evaluate(valid_dataset)
+        val_loss_log.append(val_loss)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s '
               '| valid loss {:8.5f} | '.format(epoch,
@@ -243,6 +245,7 @@ if __name__ == "__main__":
     print('| End of training | test loss {:8.5f}'.format(
         test_loss))
     print('=' * 89)
+    print_loss_log(train_loss_log, val_loss_log, test_loss)
 
     with open(args.save, 'wb') as f:
         torch.save(model.bert_model, f)

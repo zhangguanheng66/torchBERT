@@ -4,6 +4,7 @@ import math
 import torch
 import torch.nn as nn
 from model import MLMTask
+from utils import print_loss_log
 
 
 def batchify(txt_data, bsz):
@@ -117,6 +118,7 @@ def train():
 
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
+            train_loss_log.append(cur_loss)
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | '
                   'loss {:5.2f} | ppl {:8.2f}'.format(
@@ -125,8 +127,6 @@ def train():
             total_loss = 0
             start_time = time.time()
 
-
-# At any point you can hit Ctrl + C to break out of training early.
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 Transformer Language Model')
@@ -245,11 +245,14 @@ if __name__ == "__main__":
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
     best_val_loss = None
+    train_loss_log, val_loss_log = [], []
 
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train()
         val_loss = evaluate(val_data)
+        val_loss_log.append(val_loss)
+
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
               'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -277,6 +280,7 @@ if __name__ == "__main__":
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_loss, math.exp(test_loss)))
     print('=' * 89)
+    print_loss_log(train_loss_log, val_loss_log, test_loss)
 
     ###############################################################################
     # Save the bert model layer
