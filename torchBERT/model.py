@@ -248,12 +248,12 @@ class MLMTask(nn.Module):
 class NextSentenceTask(nn.Module):
     """Contain a pretrain BERT model and a linear layer."""
 
-    def __init__(self, pretrained_bert):
+    def __init__(self, bert_model):
         super(NextSentenceTask, self).__init__()
-        self.bert_model = pretrained_bert
-        self.linear_layer = nn.Linear(pretrained_bert.ninp,
-                                      pretrained_bert.ninp)
-        self.ns_span = nn.Linear(pretrained_bert.ninp, 2)
+        self.bert_model = bert_model
+        self.linear_layer = nn.Linear(bert_model.ninp,
+                                      bert_model.ninp)
+        self.ns_span = nn.Linear(bert_model.ninp, 2)
         self.activation = nn.Tanh()
 
     def forward(self, src, token_type_input):
@@ -271,15 +271,17 @@ class NextSentenceTask(nn.Module):
 class QuestionAnswerTask(nn.Module):
     """Contain a pretrain BERT model and a linear layer."""
 
-    def __init__(self, pretrained_bert):
+    def __init__(self, bert_model):
         super(QuestionAnswerTask, self).__init__()
-        self.pretrained_bert = pretrained_bert
-        self.qa_span = nn.Linear(pretrained_bert.ninp, 2)
+        self.bert_model = bert_model
+        self.activation = F.gelu
+        self.qa_span = nn.Linear(bert_model.ninp, 2)
 
     def forward(self, src, token_type_input):
-        output = self.pretrained_bert(src, token_type_input)
+        output = self.bert_model(src, token_type_input)
         # transpose output (S, N, E) to (N, S, E)
         output = output.transpose(0, 1)
+        output = self.activation(output)
         pos_output = self.qa_span(output)
         start_pos, end_pos = pos_output.split(1, dim=-1)
         start_pos = start_pos.squeeze(-1)
