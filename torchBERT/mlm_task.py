@@ -206,6 +206,8 @@ if __name__ == "__main__":
         from torchtext.experimental.datasets import WikiText2 as WLMDataset
     elif args.dataset == 'WMTNewsCrawl':
         from data import WMTNewsCrawl as WLMDataset
+    elif args.dataset == 'EnWik9':
+        from torchtext.datasets import EnWik9
     else:
         print("dataset for MLM task is not supported")
 
@@ -224,6 +226,19 @@ if __name__ == "__main__":
     elif args.dataset == 'WMTNewsCrawl':
         test_dataset, valid_dataset = torchtext.experimental.datasets.WikiText2(vocab=vocab, data_select=('test', 'valid'))
         train_dataset, = WLMDataset(vocab=vocab, data_select='train')
+    elif args.dataset == 'EnWik9':
+        enwik9 = EnWik9()
+        idx1, idx2 = int(len(enwik9) * 0.8), int(len(enwik9) * 0.9)
+        train_data = torch.tensor([vocab.stoi[_id]
+                                  for _id in enwik9[0:idx1]]).long()
+        val_data = torch.tensor([vocab.stoi[_id]
+                                 for _id in enwik9[idx1:idx2]]).long()
+        test_data = torch.tensor([vocab.stoi[_id]
+                                 for _id in enwik9[idx2:]]).long()
+        from torchtext.experimental.datasets import LanguageModelingDataset
+        train_dataset = LanguageModelingDataset(train_data, vocab)
+        valid_dataset = LanguageModelingDataset(val_data, vocab)
+        test_dataset = LanguageModelingDataset(test_data, vocab)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_data = batchify(train_dataset.data, args.batch_size)
     val_data = batchify(valid_dataset.data, args.batch_size)
