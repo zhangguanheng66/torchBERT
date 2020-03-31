@@ -54,9 +54,9 @@ def batchify(txt_data, bsz, args):
 # by the batchify function. The chunks are along dimension 0, corresponding
 # to the seq_len dimension in the LSTM.
 
-def get_batch(source, i, args, rank):
-    _idx = rank * args.bptt
-    data = source[(i + _idx):(i + _idx + args.bptt)]
+def get_batch(source, i, args):
+    seq_len = min(args.bptt, len(source) - 1 - i)
+    data = source[i:i+seq_len]
     return data
 
 
@@ -67,11 +67,11 @@ def evaluate(data_source, model, vocab, ntokens, criterion, args, device_ids, ra
     mask_id = vocab.stoi['<MASK>']
     cls_id = vocab.stoi['<cls>']
     with torch.no_grad():
-        for i in range(0, data_source.size(0) - 1, args.bptt * args.world_size):
+        for i in range(0, data_source.size(0) - 1, args.bptt):
 
             if i + args.bptt * args.world_size > len(data_source):
                 continue
-            data = get_batch(data_source, i, args, rank)
+            data = get_batch(data_source, i, args)
             # Generate masks with args.mask_frac
             data_len = data.size(0)
             ones_num = int(data_len * args.mask_frac)
@@ -92,7 +92,7 @@ def evaluate(data_source, model, vocab, ntokens, criterion, args, device_ids, ra
             output = torch.stack([output[i] for i in range(lm_mask.size(0)) if lm_mask[i]])
             output_flat = output.view(-1, ntokens)
             total_loss += criterion(output_flat, targets.to(device_ids[0])).item()
-    return total_loss / ((len(data_source) - 1) / (args.bptt * args.world_size))
+    return total_loss / ((len(data_source) - 1) / args.bptt)
 
 
 def train(model, vocab, train_loss_log, train_data,
@@ -104,13 +104,10 @@ def train(model, vocab, train_loss_log, train_data,
     mask_id = vocab.stoi['<MASK>']
     cls_id = vocab.stoi['<cls>']
     train_loss_log.append(0.0)
-    for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt * args.world_size)):
+    for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
 
-        if i + args.bptt * args.world_size > len(train_data):
-            continue
+        data = get_batch(train_data, i, args)
 
-        data = get_batch(train_data, i, args, rank)
-        # print('rank, device_ids:', rank, device_ids)
         # Generate masks with args.mask_frac
         data_len = data.size(0)
         ones_num = int(data_len * args.mask_frac)
@@ -148,7 +145,7 @@ def train(model, vocab, train_loss_log, train_data,
                 train_loss_log[-1] = cur_loss
                 print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | '
                       'loss {:5.2f} | ppl {:8.2f}'.format(
-                      epoch, batch, len(train_data) // (args.bptt * args.world_size), scheduler.get_last_lr()[0],
+                      epoch, batch, len(train_data) // args.bptt, scheduler.get_last_lr()[0],
                       elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()
@@ -204,6 +201,11 @@ def run_main(rank, world_size, args):
         valid_dataset = LanguageModelingDataset(val_data, vocab)
         test_dataset = LanguageModelingDataset(test_data, vocab)
     train_data = batchify(train_dataset.data, args.batch_size, args)
+
+    # Chunk training data by rank for different gpus
+    chunk_len = len(train_data) // args.world_size
+    train_data = train_data[(rank*chunk_len):((rank + 1)*chunk_len)]
+
     val_data = batchify(valid_dataset.data, args.batch_size, args)
     test_data = batchify(test_dataset.data, args.batch_size, args)
 
