@@ -42,5 +42,4 @@ source activate /private/home/zhangguanheng/anaconda3/envs/slurm_envir
 ### the wrapper.sh example I showed before so that each task only
 ### sees one GPU
 
-#srun --label --ntasks-per-node=1 --time=600 --mem-per-cpu=5120 --gres=gpu:8 --cpus-per-task 80 --nodes=1 --pty python distributed_mlm_task.py --world_size 8 --seed 2514683 --epochs 50 --emsize 128 --nhid 512  --nlayers 2 --nhead 8 --save-vocab squad_30k_vocab_cls_sep.pt --dataset EnWik9  --lr 2  --bptt 128  --log-interval 600  --batch_size 56
-srun --label --ntasks-per-node=1 --time=600 --mem-per-cpu=5120 --gres=gpu:8 --cpus-per-task 80 --nodes=1 --pty python distributed_mlm_task.py --world_size 8 --seed 2514683 --epochs 2 --emsize 128 --nhid 512  --nlayers 2 --nhead 8 --save-vocab squad_30k_vocab_cls_sep.pt --dataset EnWik9  --lr 2  --bptt 128  --log-interval 600  --batch_size 56
+srun --label --ntasks-per-node=1 --time=600 --mem-per-cpu=5120 --gres=gpu:8 --cpus-per-task 80 --nodes=1 --pty python distributed_mlm_task.py --world_size 8 --seed 2514683 --epochs 100 --emsize 128 --nhid 512  --nlayers 2 --nhead 8 --save-vocab squad_30k_vocab_cls_sep.pt --dataset EnWik9  --lr 2  --bptt 128  --log-interval 600  --batch_size 56
