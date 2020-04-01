@@ -246,7 +246,7 @@ def run_main(rank, world_size, args):
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
             if rank == 0:
-                with open(args.save, 'wb') as f:
+                with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
                     torch.save(ddp_model.state_dict(), f)
             best_val_loss = val_loss
         else:
@@ -261,7 +261,7 @@ def run_main(rank, world_size, args):
     device_pairs = zip(rank0_devices, device_ids)
     map_location = {'cuda:%d' % x: 'cuda:%d' % y for x, y in device_pairs}
     ddp_model.load_state_dict(
-        torch.load(args.save, map_location=map_location))
+        torch.load(os.environ['SLURM_JOB_ID'] + '_' + args.save, map_location=map_location))
 
     ###############################################################################
     # Run on test data.
@@ -272,12 +272,12 @@ def run_main(rank, world_size, args):
         print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
               test_loss, math.exp(test_loss)))
         print('=' * 89)
-        print_loss_log('mlm_loss.txt', train_loss_log, val_loss_log, test_loss)
+        print_loss_log(os.environ['SLURM_JOB_ID'] + '_mlm_loss.txt', train_loss_log, val_loss_log, test_loss, args)
 
         ###############################################################################
         # Save the bert model layer
         ###############################################################################
-        with open(args.save, 'wb') as f:
+        with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
             torch.save(ddp_model.module.bert_model, f)
 
     cleanup()
@@ -292,14 +292,16 @@ def run_demo(demo_fn, args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 Transformer Language Model')
-    parser.add_argument('--data', type=str, default='./data/wikitext-2',
-                        help='location of the data corpus')
+#    parser.add_argument('--data', type=str, default='./data/wikitext-2',
+#                        help='location of the data corpus')
     parser.add_argument('--emsize', type=int, default=32,
                         help='size of word embeddings')
     parser.add_argument('--nhid', type=int, default=64,
                         help='number of hidden units per layer')
     parser.add_argument('--nlayers', type=int, default=4,
                         help='number of layers')
+    parser.add_argument('--nhead', type=int, default=8,
+                        help='the number of heads in the encoder/decoder of the transformer model')
     parser.add_argument('--lr', type=float, default=5,
                         help='initial learning rate')
     parser.add_argument('--clip', type=float, default=0.25,
@@ -312,22 +314,18 @@ if __name__ == "__main__":
                         help='sequence length')
     parser.add_argument('--dropout', type=float, default=0.2,
                         help='dropout applied to layers (0 = no dropout)')
-    parser.add_argument('--tied', action='store_true',
-                        help='tie the word embedding and softmax weights')
+#    parser.add_argument('--tied', action='store_true',
+#                        help='tie the word embedding and softmax weights')
     parser.add_argument('--seed', type=int, default=1111,
                         help='random seed')
-    parser.add_argument('--cuda', action='store_true',
-                        help='use CUDA')
+#    parser.add_argument('--cuda', action='store_true',
+#                        help='use CUDA')
     parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='report interval')
     parser.add_argument('--save', type=str, default='bert_model.pt',
                         help='path to save the final model')
     parser.add_argument('--save-vocab', type=str, default='vocab.pt',
                         help='path to save the vocab')
-
-    parser.add_argument('--nhead', type=int, default=8,
-                        help='the number of heads in the encoder/decoder of the transformer model')
-
     parser.add_argument('--mask_frac', type=float, default=0.15,
                         help='the fraction of masked tokens')
     parser.add_argument('--dataset', type=str, default='WikiText2',
