@@ -4,26 +4,10 @@ import math
 import torch
 import torch.nn as nn
 from model import MLMTask
-from utils import print_loss_log
+from utils import setup, cleanup, run_demo, print_loss_log
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 import os
-
-
-def setup(rank, world_size, seed):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-    # Explicitly setting seed to make sure that models created in two processes
-    # start from same random weights and biases.
-    torch.manual_seed(seed)
-
-
-def cleanup():
-    dist.destroy_process_group()
 
 
 def batchify(txt_data, bsz, args):
@@ -60,7 +44,7 @@ def get_batch(source, i, args):
     return data
 
 
-def evaluate(data_source, model, vocab, ntokens, criterion, args, device_ids, rank):
+def evaluate(data_source, model, vocab, ntokens, criterion, args, device):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.
@@ -88,15 +72,14 @@ def evaluate(data_source, model, vocab, ntokens, criterion, args, device_ids, ra
 
             data = data.transpose(0, 1)  # Wrap up by nn.DataParallel
             output = model(data)
-            output = output.transpose(0, 1)  # Wrap up by nn.DataParallel
             output = torch.stack([output[i] for i in range(lm_mask.size(0)) if lm_mask[i]])
             output_flat = output.view(-1, ntokens)
-            total_loss += criterion(output_flat, targets.to(device_ids[0])).item()
+            total_loss += criterion(output_flat, targets.to(device[0])).item()
     return total_loss / ((len(data_source) - 1) / args.bptt)
 
 
 def train(model, vocab, train_loss_log, train_data,
-          optimizer, criterion, ntokens, epoch, scheduler, args, device_ids, rank):
+          optimizer, criterion, ntokens, epoch, scheduler, args, device, rank=None):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0.
@@ -127,9 +110,8 @@ def train(model, vocab, train_loss_log, train_data,
         optimizer.zero_grad()
         data = data.transpose(0, 1)  # Wrap up by nn.DataParallel
         output = model(data)
-        output = output.transpose(0, 1)  # Wrap up by nn.DataParallel
         output = torch.stack([output[i] for i in range(lm_mask.size(0)) if lm_mask[i]])
-        loss = criterion(output.view(-1, ntokens), targets.to(device_ids[0]))
+        loss = criterion(output.view(-1, ntokens), targets.to(device[0]))
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -141,7 +123,7 @@ def train(model, vocab, train_loss_log, train_data,
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
-            if rank == 0:
+            if (rank is None) or rank == 0:
                 train_loss_log[-1] = cur_loss
                 print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | '
                       'loss {:5.2f} | ppl {:8.2f}'.format(
@@ -151,16 +133,25 @@ def train(model, vocab, train_loss_log, train_data,
             start_time = time.time()
 
 
-def run_main(rank, world_size, args):
-    setup(rank, world_size, args.seed)
-    n = torch.cuda.device_count() // world_size
-    device_ids = list(range(rank * n, (rank + 1) * n))
+def run_ddp(rank, args):
+    setup(rank, args.world_size, args.seed)
+    run_main(args, rank)
+    cleanup()
 
-    import torchtext
+
+def run_main(args, rank=None):
+    # Set the random seed manually for reproducibility.
+    torch.manual_seed(args.seed)
+    if args.parallel == 'DDP':
+        n = torch.cuda.device_count() // args.world_size
+        device = list(range(rank * n, (rank + 1) * n))
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ###############################################################################
     # Import dataset
     ###############################################################################
+    import torchtext
     if args.dataset == 'WikiText103':
         from torchtext.experimental.datasets import WikiText103 as WLMDataset
     elif args.dataset == 'WikiText2':
@@ -202,9 +193,10 @@ def run_main(rank, world_size, args):
         test_dataset = LanguageModelingDataset(test_data, vocab)
     train_data = batchify(train_dataset.data, args.batch_size, args)
 
-    # Chunk training data by rank for different gpus
-    chunk_len = len(train_data) // args.world_size
-    train_data = train_data[(rank*chunk_len):((rank + 1)*chunk_len)]
+    if rank is not None:
+        # Chunk training data by rank for different gpus
+        chunk_len = len(train_data) // args.world_size
+        train_data = train_data[(rank*chunk_len):((rank + 1)*chunk_len)]
 
     val_data = batchify(valid_dataset.data, args.batch_size, args)
     test_data = batchify(test_dataset.data, args.batch_size, args)
@@ -214,28 +206,31 @@ def run_main(rank, world_size, args):
     ###############################################################################
 
     ntokens = len(train_dataset.get_vocab())
-    model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device_ids[0])
-    #model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
-    ddp_model = DDP(model, device_ids=device_ids)
+    if args.parallel == 'DDP':
+        model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device[0])
+        #model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
+        model = DDP(model, device_ids=device)
+    else:
+        model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
     criterion = nn.CrossEntropyLoss()
 
     ###############################################################################
     # Loop over epochs.
     ###############################################################################
     lr = args.lr
-    optimizer = torch.optim.SGD(ddp_model.parameters(), lr=lr)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
     best_val_loss = None
     train_loss_log, val_loss_log = [], []
 
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
-        train(ddp_model, train_dataset.vocab, train_loss_log, train_data,
-              optimizer, criterion, ntokens, epoch, scheduler, args, device_ids, rank)
+        train(model, train_dataset.vocab, train_loss_log, train_data,
+              optimizer, criterion, ntokens, epoch, scheduler, args, device, rank)
         # train()
-        val_loss = evaluate(val_data, ddp_model, train_dataset.vocab, ntokens, criterion, args, device_ids, rank)
+        val_loss = evaluate(val_data, model, train_dataset.vocab, ntokens, criterion, args, device)
 
-        if rank == 0:
+        if (rank is None) or (rank == 0):
             val_loss_log.append(val_loss)
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
@@ -245,9 +240,12 @@ def run_main(rank, world_size, args):
 
         # Save the model if the validation loss is the best we've seen so far.
         if not best_val_loss or val_loss < best_val_loss:
-            if rank == 0:
+            if rank is None:
+                with open(args.save, 'wb') as f:
+                    torch.save(model, f)
+            elif rank == 0:
                 with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
-                    torch.save(ddp_model.state_dict(), f)
+                    torch.save(model.state_dict(), f)
             best_val_loss = val_loss
         else:
             scheduler.step()
@@ -255,45 +253,50 @@ def run_main(rank, world_size, args):
     ###############################################################################
     # Load the best saved model.
     ###############################################################################
-    dist.barrier()
-    # configure map_location properly
-    rank0_devices = [x - rank * len(device_ids) for x in device_ids]
-    device_pairs = zip(rank0_devices, device_ids)
-    map_location = {'cuda:%d' % x: 'cuda:%d' % y for x, y in device_pairs}
-    ddp_model.load_state_dict(
-        torch.load(os.environ['SLURM_JOB_ID'] + '_' + args.save, map_location=map_location))
+    if args.parallel == 'DDP':
+        dist.barrier()
+        # configure map_location properly
+        rank0_devices = [x - rank * len(device) for x in device]
+        device_pairs = zip(rank0_devices, device)
+        map_location = {'cuda:%d' % x: 'cuda:%d' % y for x, y in device_pairs}
+        model.load_state_dict(
+            torch.load(os.environ['SLURM_JOB_ID'] + '_' + args.save, map_location=map_location))
 
-    ###############################################################################
-    # Run on test data.
-    ###############################################################################
-    test_loss = evaluate(test_data, ddp_model, train_dataset.vocab, ntokens, criterion, args, device_ids, rank)
-    if rank == 0:
+        ###############################################################################
+        # Run on test data.
+        ###############################################################################
+        test_loss = evaluate(test_data, model, train_dataset.vocab, ntokens, criterion, args, device)
+        if rank == 0:
+            print('=' * 89)
+            print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
+                  test_loss, math.exp(test_loss)))
+            print('=' * 89)
+            print_loss_log(os.environ['SLURM_JOB_ID'] + '_mlm_loss.txt', train_loss_log, val_loss_log, test_loss, args)
+
+            ###############################################################################
+            # Save the bert model layer
+            ###############################################################################
+            with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
+                torch.save(model.module.bert_model, f)
+    else:
+        with open(args.save, 'rb') as f:
+            model = torch.load(f)
+        test_loss = evaluate(test_data, model, train_dataset.vocab, ntokens, criterion, args, device)
         print('=' * 89)
         print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
               test_loss, math.exp(test_loss)))
         print('=' * 89)
-        print_loss_log(os.environ['SLURM_JOB_ID'] + '_mlm_loss.txt', train_loss_log, val_loss_log, test_loss, args)
+        print_loss_log('mlm_loss.txt', train_loss_log, val_loss_log, test_loss, args)
 
         ###############################################################################
         # Save the bert model layer
         ###############################################################################
-        with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
-            torch.save(ddp_model.module.bert_model, f)
-
-    cleanup()
-
-
-def run_demo(demo_fn, args):
-    mp.spawn(demo_fn,
-             args=(args.world_size, args),
-             nprocs=args.world_size,
-             join=True)
+        with open(args.save, 'wb') as f:
+            torch.save(model.module.bert_model, f)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 Transformer Language Model')
-#    parser.add_argument('--data', type=str, default='./data/wikitext-2',
-#                        help='location of the data corpus')
     parser.add_argument('--emsize', type=int, default=32,
                         help='size of word embeddings')
     parser.add_argument('--nhid', type=int, default=64,
@@ -314,12 +317,8 @@ if __name__ == "__main__":
                         help='sequence length')
     parser.add_argument('--dropout', type=float, default=0.2,
                         help='dropout applied to layers (0 = no dropout)')
-#    parser.add_argument('--tied', action='store_true',
-#                        help='tie the word embedding and softmax weights')
     parser.add_argument('--seed', type=int, default=1111,
                         help='random seed')
-#    parser.add_argument('--cuda', action='store_true',
-#                        help='use CUDA')
     parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='report interval')
     parser.add_argument('--save', type=str, default='bert_model.pt',
@@ -336,5 +335,7 @@ if __name__ == "__main__":
                         help='the world size to initiate DPP')
     args = parser.parse_args()
 
-    run_demo(run_main, args)
-# python main.py --seed 6868 --epochs 3 --emsize 256 --nhid 3072  --nlayers 12 --nhead 16 --save-vocab squad_vocab.pt
+    if args.parallel == 'DDP':
+        run_demo(run_ddp, args)
+    else:
+        run_main(args)

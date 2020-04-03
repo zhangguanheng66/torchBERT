@@ -7,10 +7,12 @@ from torch.utils.data import DataLoader
 import torchtext
 from data import WikiText103
 from model import NextSentenceTask
-from utils import print_loss_log
+from utils import setup, cleanup, run_demo, print_loss_log
+import torch.distributed as dist
+import os
 
 
-def generate_next_sentence_data(whole_data):
+def generate_next_sentence_data(whole_data, args):
     processed_data = []
 
     for item in whole_data:
@@ -31,7 +33,7 @@ def generate_next_sentence_data(whole_data):
     return processed_data
 
 
-def pad_next_sentence_data(batch):
+def pad_next_sentence_data(batch, args, sep_id, pad_id):
     # Fix sequence length to args.bptt with padding or trim
     seq_list = []
     tok_type = []
@@ -51,33 +53,40 @@ def pad_next_sentence_data(batch):
         tok_type.append(_tok_tp)
         same_sentence_labels.append(item[2])
 
-    return torch.stack(seq_list).long().t().contiguous().to(device), \
-        torch.stack(tok_type).long().t().contiguous().to(device), \
-        torch.tensor(same_sentence_labels).long().contiguous().to(device)
+    return torch.stack(seq_list).long().t().contiguous(), \
+        torch.stack(tok_type).long().t().contiguous(), \
+        torch.tensor(same_sentence_labels).long().contiguous()
 
 
 ###############################################################################
 # Evaluating code
 ###############################################################################
 
-def evaluate(data_source):
+
+def evaluate(data_source, model, device, criterion, sep_id, pad_id, args):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.
     batch_size = args.batch_size
     dataloader = DataLoader(data_source, batch_size=batch_size, shuffle=True,
-                            collate_fn=pad_next_sentence_data)
+                            collate_fn=lambda b: pad_next_sentence_data(b, args, sep_id, pad_id))
     cls_id = data_source.vocab.stoi['<cls>']
 
     with torch.no_grad():
         for idx, (seq_input, tok_type, target_ns_labels) in enumerate(dataloader):
             # Add <'cls'> token id to the beginning of seq across batches
-            seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-            tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
-
+            seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long(), seq_input))
+            tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long(), tok_type))
+            if args.parallel == 'DDP':
+                seq_input = seq_input.to(device[0])
+                tok_type = tok_type.to(device[0])
+                target_ns_labels = target_ns_labels.to(device[0])
+            else:
+                seq_input = seq_input.to(device)
+                tok_type = tok_type.to(device)
+                target_ns_labels = target_ns_labels.to(device)
+            seq_input = seq_input.transpose(0, 1)  # Wrap up by DDP or DataParallel
             ns_labels = model(seq_input, token_type_input=tok_type)
-            #print('ns_labels.size(), target_ns_labels.size()', ns_labels.size(), target_ns_labels.size())
-            #print('ns_labels, target_ns_labels', ns_labels, target_ns_labels)
             loss = criterion(ns_labels, target_ns_labels)
             total_loss += loss.item()
 
@@ -88,28 +97,35 @@ def evaluate(data_source):
 # Training code
 ###############################################################################
 
-def train():
+def train(train_dataset, model, train_loss_log, device, optimizer, criterion,
+          epoch, scheduler, sep_id, pad_id, args, rank=None):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0.
     start_time = time.time()
     batch_size = args.batch_size
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                            collate_fn=pad_next_sentence_data)
+                            collate_fn=lambda b: pad_next_sentence_data(b, args, sep_id, pad_id))
     cls_id = train_dataset.vocab.stoi['<cls>']
     train_loss_log.append(0.0)
-#    softmax = torch.nn.Softmax(dim=-1) # print
 
     for idx, (seq_input, tok_type, target_ns_labels) in enumerate(dataloader):
         # Add <'cls'> token id to the beginning of seq across batches
-        seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-        tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
-#        print('seq_input.size(), seq_input, tok_type.size(), tok_type', seq_input.size(), seq_input, tok_type.size(), tok_type)
+        seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long(), seq_input))
+        tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long(), tok_type))
+        if args.parallel == 'DDP':
+            seq_input = seq_input.to(device[0])
+            tok_type = tok_type.to(device[0])
+            target_ns_labels = target_ns_labels.to(device[0])
+        else:
+            seq_input = seq_input.to(device)
+            tok_type = tok_type.to(device)
+            target_ns_labels = target_ns_labels.to(device)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         optimizer.zero_grad()
+        seq_input = seq_input.transpose(0, 1)  # Wrap up by DDP or DataParallel
         ns_labels = model(seq_input, token_type_input=tok_type)
-#        print("batch, softmax(ns_labels).argmax(1), target_ns_labels", idx, softmax(ns_labels).argmax(1), target_ns_labels)
         loss = criterion(ns_labels, target_ns_labels)
         loss.backward()
 
@@ -122,17 +138,151 @@ def train():
 
         if idx % args.log_interval == 0 and idx > 0:
             cur_loss = total_loss / args.log_interval
-            train_loss_log[-1] = cur_loss
             elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | '
-                  'ms/batch {:5.2f} | '
-                  'loss {:8.5f} | ppl {:5.2f}'.format(epoch, idx,
-                                                      len(train_dataset) // batch_size,
-                                                      scheduler.get_last_lr()[0],
-                                                      elapsed * 1000 / args.log_interval,
-                                                      cur_loss, math.exp(cur_loss)))
+            if (rank is None) or rank == 0:
+                train_loss_log[-1] = cur_loss
+                print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:05.5f} | '
+                      'ms/batch {:5.2f} | '
+                      'loss {:8.5f} | ppl {:5.2f}'.format(epoch, idx,
+                                                          len(train_dataset) // batch_size,
+                                                          scheduler.get_last_lr()[0],
+                                                          elapsed * 1000 / args.log_interval,
+                                                          cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()
+
+
+def run_ddp(rank, args):
+    setup(rank, args.world_size, args.seed)
+    run_main(args, rank)
+    cleanup()
+
+
+def run_main(args, rank=None):
+
+    # Set the random seed manually for reproducibility.
+    torch.manual_seed(args.seed)
+    if args.parallel == 'DDP':
+        n = torch.cuda.device_count() // args.world_size
+        device = list(range(rank * n, (rank + 1) * n))
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    ###################################################################
+    # Load data
+    ###################################################################
+    # Support WikiText103 for next sentence only
+    try:
+        vocab = torch.load(args.save_vocab)
+    except:
+        train_dataset, valid_dataset, test_dataset = WikiText103()
+        old_vocab = train_dataset.vocab
+        vocab = torchtext.vocab.Vocab(counter=old_vocab.freqs,
+                                      specials=['<unk>', '<pad>', '<MASK>'])
+        with open(args.save_vocab, 'wb') as f:
+            torch.save(vocab, f)
+    pad_id = vocab.stoi['<pad>']
+    sep_id = vocab.stoi['<sep>']
+    train_dataset, valid_dataset, test_dataset = WikiText103(vocab=vocab,
+                                                             single_line=False)
+    if rank is not None:
+        chunk_len = len(train_dataset.data) // args.world_size
+        train_dataset.data = train_dataset.data[(rank * chunk_len):((rank + 1) * chunk_len)]
+    train_dataset.data = generate_next_sentence_data(train_dataset.data, args)
+    valid_dataset.data = generate_next_sentence_data(valid_dataset.data, args)
+    test_dataset.data = generate_next_sentence_data(test_dataset.data, args)
+
+    ###################################################################
+    # Build the model
+    ###################################################################
+    if args.parallel == 'DDP' and 'SLURM_JOB_ID' in os.environ:
+        pretrained_bert = torch.load(os.environ['SLURM_JOB_ID'] + args.bert_model)
+    else:
+        pretrained_bert = torch.load(args.bert_model)
+    pretrained_bert = torch.load(args.bert_model)
+    if args.parallel == 'DDP':
+        model = NextSentenceTask(pretrained_bert).to(device[0])
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        model = DDP(model, device_ids=device)
+    else:
+        model = NextSentenceTask(pretrained_bert).to(device)
+
+    criterion = nn.CrossEntropyLoss()
+
+    ###################################################################
+    # Loop over epochs.
+    ###################################################################
+
+    lr = args.lr
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
+    best_val_loss = None
+    train_loss_log, val_loss_log = [], []
+
+    for epoch in range(1, args.epochs + 1):
+        epoch_start_time = time.time()
+        train(train_dataset, model, train_loss_log, device, optimizer,
+              criterion, epoch, scheduler, sep_id, pad_id, args, rank)
+        val_loss = evaluate(valid_dataset, model, device, criterion,
+                            sep_id, pad_id, args)
+        val_loss_log.append(val_loss)
+
+        if (rank is None) or (rank == 0):
+            print('-' * 89)
+            print('| end of epoch {:3d} | time: {:5.2f}s '
+                  '| valid loss {:8.5f} | '.format(epoch,
+                                                   (time.time() - epoch_start_time),
+                                                   val_loss))
+            print('-' * 89)
+        # Save the model if the validation loss is the best we've seen so far.
+        if not best_val_loss or val_loss < best_val_loss:
+            if rank is None:
+                with open(args.save, 'wb') as f:
+                    torch.save(model, f)
+            elif rank == 0:
+                with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
+                    torch.save(model.state_dict(), f)
+            best_val_loss = val_loss
+        else:
+            scheduler.step()
+
+    ###################################################################
+    # Load the best saved model and run on test data
+    ###################################################################
+    if args.parallel == 'DDP':
+        dist.barrier()
+        # configure map_location properly
+        rank0_devices = [x - rank * len(device) for x in device]
+        device_pairs = zip(rank0_devices, device)
+        map_location = {'cuda:%d' % x: 'cuda:%d' % y for x, y in device_pairs}
+        model.load_state_dict(torch.load(os.environ['SLURM_JOB_ID'] + '_' + args.save, map_location=map_location))
+        test_loss = evaluate(test_dataset, model, device, criterion, sep_id, pad_id, args)
+        if rank == 0:
+            print('=' * 89)
+            print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
+                  test_loss, math.exp(test_loss)))
+            print('=' * 89)
+            print_loss_log(os.environ['SLURM_JOB_ID'] + '_mlm_loss.txt', train_loss_log, val_loss_log, test_loss, args)
+
+        ###############################################################################
+        # Save the bert model layer
+        ###############################################################################
+            with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
+                torch.save(model.module.bert_model, f)
+    else:
+        with open(args.save, 'rb') as f:
+            model = torch.load(f)
+
+        test_loss = evaluate(test_dataset, model, device,
+                             criterion, sep_id, pad_id)
+        print('=' * 89)
+        print('| End of training | test loss {:8.5f}'.format(
+            test_loss))
+        print('=' * 89)
+        print_loss_log('ns_loss.txt', train_loss_log, val_loss_log, test_loss)
+
+        with open(args.save, 'wb') as f:
+            torch.save(model.bert_model, f)
 
 
 if __name__ == "__main__":
@@ -163,91 +313,13 @@ if __name__ == "__main__":
                         help='path to save the pretrained bert')
     parser.add_argument('--frac_ns', type=float, default=0.5,
                         help='fraction of not next sentence')
+    parser.add_argument('--parallel', type=str, default='None',
+                        help='Use DataParallel/DDP to train model')
+    parser.add_argument('--world_size', type=int, default=1,
+                        help='the world size to initiate DPP')
     args = parser.parse_args()
 
-    # Set the random seed manually for reproducibility.
-    torch.manual_seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    ###################################################################
-    # Load data
-    ###################################################################
-    # Support WikiText103 for next sentence only
-    try:
-        vocab = torch.load(args.save_vocab)
-    except:
-        train_dataset, valid_dataset, test_dataset = WikiText103()
-        old_vocab = train_dataset.vocab
-        vocab = torchtext.vocab.Vocab(counter=old_vocab.freqs,
-                                      specials=['<unk>', '<pad>', '<MASK>'])
-        with open(args.save_vocab, 'wb') as f:
-            torch.save(vocab, f)
-    pad_id = vocab.stoi['<pad>']
-    sep_id = vocab.stoi['<sep>']
-
-    train_dataset, valid_dataset, test_dataset = WikiText103(vocab=vocab,
-                                                             single_line=False)
-    train_dataset.data = generate_next_sentence_data(train_dataset.data)
-    valid_dataset.data = generate_next_sentence_data(valid_dataset.data)
-    test_dataset.data = generate_next_sentence_data(test_dataset.data)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    ###################################################################
-    ###################################################################
-    # Build the model
-    ###################################################################
-
-    pretrained_bert = torch.load(args.bert_model)
-    model = NextSentenceTask(pretrained_bert).to(device)
-
-    criterion = nn.CrossEntropyLoss()
-
-    ###################################################################
-    # Loop over epochs.
-    ###################################################################
-
-    lr = args.lr
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
-    best_val_loss = None
-    train_loss_log, val_loss_log = [], []
-
-    for epoch in range(1, args.epochs + 1):
-        epoch_start_time = time.time()
-        train()
-        val_loss = evaluate(valid_dataset)
-        val_loss_log.append(val_loss)
-        print('-' * 89)
-        print('| end of epoch {:3d} | time: {:5.2f}s '
-              '| valid loss {:8.5f} | '.format(epoch,
-                                               (time.time() - epoch_start_time),
-                                               val_loss))
-        print('-' * 89)
-        # Save the model if the validation loss is the best we've seen so far.
-        if not best_val_loss or val_loss < best_val_loss:
-            with open(args.save, 'wb') as f:
-                torch.save(model, f)
-            best_val_loss = val_loss
-        else:
-            scheduler.step()
-
-    ###################################################################
-    # Load the best saved model.
-    ###################################################################
-    with open(args.save, 'rb') as f:
-        model = torch.load(f)
-
-    ###################################################################
-    # Run on test data.
-    ###################################################################
-    test_loss = evaluate(test_dataset)
-    print('=' * 89)
-    print('| End of training | test loss {:8.5f}'.format(
-        test_loss))
-    print('=' * 89)
-    print_loss_log('ns_loss.txt', train_loss_log, val_loss_log, test_loss)
-
-    with open(args.save, 'wb') as f:
-        torch.save(model.bert_model, f)
-#python qa_task.py --bert-model squad_vocab_pretrained_bert.pt --epochs 2 --save-vocab squad_vocab.pt
+    if args.parallel == 'DDP':
+        run_demo(run_ddp, args)
+    else:
+        run_main(args)

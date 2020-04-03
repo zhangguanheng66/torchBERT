@@ -46,6 +46,8 @@ source activate /private/home/zhangguanheng/anaconda3/envs/slurm_envir
 ### the wrapper.sh example I showed before so that each task only
 ### sees one GPU
 
-srun --label --nodelist=learnfair[0721] --ntasks-per-node=1 --time=2500 --mem-per-cpu=5120 --gres=gpu:8 --cpus-per-task 80 --nodes=1 --pty python distributed_mlm_task.py --world_size 8 --seed 5431916812 --epochs 50 --emsize 768 --nhid 3072  --nlayers 12 --nhead 12 --save-vocab squad_30k_vocab_cls_sep.pt --dataset EnWik9 --lr 6  --bptt 128  --batch_size 56 --clip 0.1 --log-interval 600
+#srun --label --nodelist=learnfair[0721] --ntasks-per-node=1 --time=2500 --mem-per-cpu=5120 --gres=gpu:8 --cpus-per-task 80 --nodes=1 --pty python distributed_mlm_task.py --world_size 8 --parallel DDP --seed 5431916812 --epochs 100 --emsize 768 --nhid 3072  --nlayers 12 --nhead 12 --save-vocab squad_30k_vocab_cls_sep.pt --dataset EnWik9 --lr 6  --bptt 128  --batch_size 56 --clip 0.1 --log-interval 600
+#srun --label --nodelist=learnfair[0721] --ntasks-per-node=1 --time=2500 --mem-per-cpu=5120 --gres=gpu:8 --cpus-per-task 80 --nodes=1 --pty python ns_task.py --world_size 8 --parallel DDP --bert-model bert_model.pt --epochs 100 --save-vocab squad_30k_vocab_cls_sep.pt --seed 312216194  --lr 6.0 --bptt 128 --batch_size 72 --clip 0.1 --log-interval 600
+srun --label --nodelist=learnfair[0721] --ntasks-per-node=1 --time=4000 --mem-per-cpu=5120 --gres=gpu:8 --cpus-per-task 80 --nodes=1 --pty ./run_bert.sh 
 
 #python distributed_mlm_task.py --world_size 8 --seed 2514683 --epochs 100 --emsize 128 --nhid 512  --nlayers 2 --nhead 8 --save-vocab squad_30k_vocab_cls_sep.pt --dataset EnWik9  --lr 2  --bptt 128  --log-interval 600  --batch_size 56

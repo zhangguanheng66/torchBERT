@@ -242,7 +242,7 @@ class MLMTask(nn.Module):
         output = self.activation(output)
         output = self.norm_layer(output)
         output = self.mlm_head(output)
-        return output.transpose(0, 1)  # Wrap up by nn.DataParallel
+        return output
 
 
 class NextSentenceTask(nn.Module):
@@ -257,14 +257,12 @@ class NextSentenceTask(nn.Module):
         self.activation = nn.Tanh()
 
     def forward(self, src, token_type_input):
+        src = src.transpose(0, 1)  # Wrap up by nn.DataParallel
         output = self.bert_model(src, token_type_input)
 
         # Send the first <'cls'> seq to a classifier
-#        print('output[0].size()', output[0].size(), output[0])
         output = self.activation(self.linear_layer(output[0]))
         output = self.ns_span(output)
-#        print('output.size()', output.size(), output)
-#        print('self.activation(output).size()', self.activation(output).size(), self.activation(output))
         return output
 
 
