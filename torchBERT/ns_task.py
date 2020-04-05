@@ -195,10 +195,6 @@ def run_main(args, rank=None):
     ###################################################################
     # Build the model
     ###################################################################
-    if args.parallel == 'DDP' and 'SLURM_JOB_ID' in os.environ:
-        pretrained_bert = torch.load(os.environ['SLURM_JOB_ID'] + args.bert_model)
-    else:
-        pretrained_bert = torch.load(args.bert_model)
     pretrained_bert = torch.load(args.bert_model)
     if args.parallel == 'DDP':
         model = NextSentenceTask(pretrained_bert).to(device[0])
