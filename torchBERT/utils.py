@@ -5,10 +5,11 @@ import torch.multiprocessing as mp
 
 
 def setup(rank, world_size, seed):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['RANK'] = os.environ['SLURM_PROCID']
+    os.environ['WORLD_SIZE'] = str(2)
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    print("os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], rank, os.environ['SLURM_PROCID']: ", os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], rank, os.environ['SLURM_PROCID'])
+    dist.init_process_group("nccl", init_method='env://', world_size=2)
 
     # Explicitly setting seed to make sure that models created in two processes
     # start from same random weights and biases.

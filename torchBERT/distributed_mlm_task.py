@@ -44,7 +44,7 @@ def get_batch(source, i, args):
     return data
 
 
-def evaluate(data_source, model, vocab, ntokens, criterion, args, device):
+def evaluate(data_source, model, vocab, ntokens, criterion, args):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.
@@ -74,12 +74,12 @@ def evaluate(data_source, model, vocab, ntokens, criterion, args, device):
             output = model(data)
             output = torch.stack([output[i] for i in range(lm_mask.size(0)) if lm_mask[i]])
             output_flat = output.view(-1, ntokens)
-            total_loss += criterion(output_flat, targets.to(device[0])).item()
+            total_loss += criterion(output_flat, targets.cuda()).item()
     return total_loss / ((len(data_source) - 1) / args.bptt)
 
 
 def train(model, vocab, train_loss_log, train_data,
-          optimizer, criterion, ntokens, epoch, scheduler, args, device, rank=None):
+          optimizer, criterion, ntokens, epoch, scheduler, args, rank=None):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0.
@@ -111,7 +111,8 @@ def train(model, vocab, train_loss_log, train_data,
         data = data.transpose(0, 1)  # Wrap up by nn.DataParallel
         output = model(data)
         output = torch.stack([output[i] for i in range(lm_mask.size(0)) if lm_mask[i]])
-        loss = criterion(output.view(-1, ntokens), targets.to(device[0]))
+#        print('output.size(), data.size(), targets.size()', output.size(), data.size(), targets.size())
+        loss = criterion(output.view(-1, ntokens), targets.cuda())
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -142,11 +143,11 @@ def run_ddp(rank, args):
 def run_main(args, rank=None):
     # Set the random seed manually for reproducibility.
     torch.manual_seed(args.seed)
-    if args.parallel == 'DDP':
-        n = torch.cuda.device_count() // args.world_size
-        device = list(range(rank * n, (rank + 1) * n))
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#    if args.parallel == 'DDP':
+#        n = torch.cuda.device_count() // args.world_size
+#        device = list(range(rank * n, (rank + 1) * n))
+#    else:
+#        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ###############################################################################
     # Import dataset
@@ -205,11 +206,14 @@ def run_main(args, rank=None):
     # Build the model
     ###############################################################################
 
+    print('rank, loading data len(train_data)', rank, len(train_data))
     ntokens = len(train_dataset.get_vocab())
     if args.parallel == 'DDP':
-        model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device[0])
-        #model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
-        model = DDP(model, device_ids=device)
+#        model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device[0])
+#        #model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
+#        model = DDP(model, device_ids=device)
+        model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).cuda()
+        model = DDP(model)
     else:
         model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
     criterion = nn.CrossEntropyLoss()
@@ -226,9 +230,9 @@ def run_main(args, rank=None):
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train(model, train_dataset.vocab, train_loss_log, train_data,
-              optimizer, criterion, ntokens, epoch, scheduler, args, device, rank)
+              optimizer, criterion, ntokens, epoch, scheduler, args, rank)
         # train()
-        val_loss = evaluate(val_data, model, train_dataset.vocab, ntokens, criterion, args, device)
+        val_loss = evaluate(val_data, model, train_dataset.vocab, ntokens, criterion, args)
 
         if (rank is None) or (rank == 0):
             val_loss_log.append(val_loss)
@@ -256,16 +260,16 @@ def run_main(args, rank=None):
     if args.parallel == 'DDP':
         dist.barrier()
         # configure map_location properly
-        rank0_devices = [x - rank * len(device) for x in device]
-        device_pairs = zip(rank0_devices, device)
-        map_location = {'cuda:%d' % x: 'cuda:%d' % y for x, y in device_pairs}
-        model.load_state_dict(
-            torch.load(os.environ['SLURM_JOB_ID'] + '_' + args.save, map_location=map_location))
+#        rank0_devices = [x - rank * len(device) for x in device]
+#        device_pairs = zip(rank0_devices, device)
+#        map_location = {'cuda:%d' % x: 'cuda:%d' % y for x, y in device_pairs}
+#        model.load_state_dict(
+#            torch.load(os.environ['SLURM_JOB_ID'] + '_' + args.save, map_location=map_location))
 
         ###############################################################################
         # Run on test data.
         ###############################################################################
-        test_loss = evaluate(test_data, model, train_dataset.vocab, ntokens, criterion, args, device)
+        test_loss = evaluate(test_data, model, train_dataset.vocab, ntokens, criterion, args)
         if rank == 0:
             print('=' * 89)
             print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
@@ -281,7 +285,7 @@ def run_main(args, rank=None):
     else:
         with open(args.save, 'rb') as f:
             model = torch.load(f)
-        test_loss = evaluate(test_data, model, train_dataset.vocab, ntokens, criterion, args, device)
+        test_loss = evaluate(test_data, model, train_dataset.vocab, ntokens, criterion, args)
         print('=' * 89)
         print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
               test_loss, math.exp(test_loss)))
@@ -336,6 +340,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.parallel == 'DDP':
-        run_demo(run_ddp, args)
+#        run_demo(run_ddp, args)
+        import torch.multiprocessing as mp
+        mp.set_start_method('forkserver')
+        os.environ['RANK'] = os.environ['SLURM_PROCID']
+        os.environ['WORLD_SIZE'] = str(2)
+        print("os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], os.environ['RANK'], os.environ['SLURM_PROCID']: ", os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], os.environ['RANK'], os.environ['SLURM_PROCID'])
+#        dist.init_process_group("nccl", init_method='env://', world_size=2)
+        dist.init_process_group("nccl", init_method='env://', world_size=2)
+        run_main(args)
     else:
         run_main(args)
