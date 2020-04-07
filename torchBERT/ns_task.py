@@ -241,12 +241,12 @@ def run_main(args, rank=None):
             best_val_loss = val_loss
         else:
             scheduler.step()
-
     ###################################################################
     # Load the best saved model and run on test data
     ###################################################################
     if args.parallel == 'DDP':
-        dist.barrier()
+        # [TODO] put dist.barrier() back
+        # dist.barrier()
         # configure map_location properly
         rank0_devices = [x - rank * len(device) for x in device]
         device_pairs = zip(rank0_devices, device)
@@ -258,8 +258,7 @@ def run_main(args, rank=None):
             print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
                   test_loss, math.exp(test_loss)))
             print('=' * 89)
-            print_loss_log(os.environ['SLURM_JOB_ID'] + '_mlm_loss.txt', train_loss_log, val_loss_log, test_loss, args)
-
+            print_loss_log(os.environ['SLURM_JOB_ID'] + '_ns_loss.txt', train_loss_log, val_loss_log, test_loss, args)
         ###############################################################################
         # Save the bert model layer
         ###############################################################################
