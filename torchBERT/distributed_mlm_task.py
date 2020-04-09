@@ -160,6 +160,8 @@ def run_main(args, rank=None):
         from data import WMTNewsCrawl as WLMDataset
     elif args.dataset == 'EnWik9':
         from torchtext.datasets import EnWik9
+    elif args.dataset == 'BookCorpus':
+        from data import BookCorpus
     else:
         print("dataset for MLM task is not supported")
 
@@ -191,6 +193,9 @@ def run_main(args, rank=None):
         train_dataset = LanguageModelingDataset(train_data, vocab)
         valid_dataset = LanguageModelingDataset(val_data, vocab)
         test_dataset = LanguageModelingDataset(test_data, vocab)
+    elif args.dataset == 'BookCorpus':
+        train_dataset, test_dataset, valid_dataset = BookCorpus(vocab)
+
     train_data = batchify(train_dataset.data, args.batch_size, args)
 
     if rank is not None:

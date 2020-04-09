@@ -8,7 +8,8 @@ import io
 from torchtext.utils import download_from_url, extract_archive
 from torchtext.data.functional import numericalize_tokens_from_iterator
 from torchtext.data.functional import custom_replace
-from torchtext.data.functional import simple_space_split
+import random
+import glob
 import os
 
 
@@ -84,8 +85,8 @@ def process_raw_json_data(raw_json_data):
 
 
 def _setup_qa_datasets(dataset_name, tokenizer=get_tokenizer("basic_english"),
-                    root='.data', vocab=None, removed_tokens=[],
-                    data_select=('train', 'dev')):
+                       root='.data', vocab=None, removed_tokens=[],
+                       data_select=('train', 'dev')):
 
     if isinstance(data_select, str):
         data_select = [data_select]
@@ -500,3 +501,42 @@ class EnWik9(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.start_offsets)
+
+
+###################################################################
+# Set up dataset for book corpus
+###################################################################
+def BookCorpus(vocab, tokenizer=get_tokenizer("basic_english"),
+               data_select=('train', 'test', 'valid'), removed_tokens=[]):
+
+    if isinstance(data_select, str):
+        data_select = [data_select]
+    if not set(data_select).issubset(set(('train', 'test', 'valid'))):
+        raise TypeError('data_select is not supported!')
+
+    extracted_files = glob.glob('/datasets01/bookcorpus/021819/*/*.txt')
+    random.seed(1000)
+    random.shuffle(extracted_files)
+
+    num_files = len(extracted_files)
+    _path = {'train': extracted_files[:(num_files // 20 * 17)],
+             'test': extracted_files[(num_files // 20 * 17):(num_files // 20 * 18)],
+             'valid': extracted_files[(num_files // 20 * 18):]}
+
+    data = {}
+    for item in _path.keys():
+        data[item] = []
+        logging.info('Creating {} data'.format(item))
+        tokens = []
+        for txt_file in _path[item]:
+            with open(txt_file, 'r', encoding="utf8", errors='ignore') as f:
+                for line in f.readlines():
+                    tokens += tokenizer(line.strip())
+        data[item] = [vocab.stoi[token] for token in tokens]
+
+    for key in data_select:
+        if data[key] == []:
+            raise TypeError('Dataset {} is empty!'.format(key))
+
+    return tuple(LanguageModelingDataset(torch.tensor(data[d]).long(), vocab)
+                 for d in data_select)
