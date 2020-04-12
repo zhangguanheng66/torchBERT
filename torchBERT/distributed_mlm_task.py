@@ -209,14 +209,17 @@ def run_main(args, rank=None):
     ###############################################################################
     # Build the model
     ###############################################################################
-
     ntokens = len(train_dataset.get_vocab())
+    model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout)
+    if args.checkpoint != 'None':
+        model.bert_model = torch.load(args.checkpoint)
+
     if args.parallel == 'DDP':
-        model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device[0])
-        #model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
+        model = model.to(device[0])
+        # model = nn.DataParallel(model)  # Wrap up by nn.DataParallel
         model = DDP(model, device_ids=device)
     else:
-        model = MLMTask(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
+        model = model.to(device)
     criterion = nn.CrossEntropyLoss()
 
     ###############################################################################
@@ -283,6 +286,8 @@ def run_main(args, rank=None):
             ###############################################################################
             with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
                 torch.save(model.module.bert_model, f)
+            with open(os.environ['SLURM_JOB_ID'] + '_mlm_model.pt', 'wb') as f:
+                torch.save(model.module, f)
     else:
         with open(args.save, 'rb') as f:
             model = torch.load(f)
@@ -298,6 +303,8 @@ def run_main(args, rank=None):
         ###############################################################################
         with open(args.save, 'wb') as f:
             torch.save(model.module.bert_model, f)
+        with open('mlm_model.pt', 'wb') as f:
+            torch.save(model.module, f)
 
 
 if __name__ == "__main__":
@@ -326,6 +333,8 @@ if __name__ == "__main__":
                         help='random seed')
     parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='report interval')
+    parser.add_argument('--checkpoint', type=str, default='None',
+                        help='path to load the checkpoint')
     parser.add_argument('--save', type=str, default='bert_model.pt',
                         help='path to save the final model')
     parser.add_argument('--save-vocab', type=str, default='vocab.pt',
