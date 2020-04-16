@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchtext
-from data import WikiText103
 from model import NextSentenceTask
 from utils import setup, cleanup, run_demo, print_loss_log
 import torch.distributed as dist
@@ -171,20 +170,19 @@ def run_main(args, rank=None):
     ###################################################################
     # Load data
     ###################################################################
-    # Support WikiText103 for next sentence only
-    try:
-        vocab = torch.load(args.save_vocab)
-    except:
-        train_dataset, valid_dataset, test_dataset = WikiText103()
-        old_vocab = train_dataset.vocab
-        vocab = torchtext.vocab.Vocab(counter=old_vocab.freqs,
-                                      specials=['<unk>', '<pad>', '<MASK>'])
-        with open(args.save_vocab, 'wb') as f:
-            torch.save(vocab, f)
+    vocab = torch.load(args.save_vocab)
     pad_id = vocab.stoi['<pad>']
     sep_id = vocab.stoi['<sep>']
-    train_dataset, valid_dataset, test_dataset = WikiText103(vocab=vocab,
-                                                             single_line=False)
+
+    if args.dataset == 'WikiText103':
+        from data import WikiText103
+        train_dataset, valid_dataset, test_dataset = WikiText103(vocab=vocab,
+                                                                 single_line=False)
+    elif args.dataset == 'BookCorpus':
+        from data import BookCorpus
+        train_dataset, valid_dataset, test_dataset = BookCorpus(vocab=vocab,
+                                                                min_sentence_len=args.min_sentence_len)
+
     if rank is not None:
         chunk_len = len(train_dataset.data) // args.world_size
         train_dataset.data = train_dataset.data[(rank * chunk_len):((rank + 1) * chunk_len)]
@@ -196,12 +194,16 @@ def run_main(args, rank=None):
     # Build the model
     ###################################################################
     pretrained_bert = torch.load(args.bert_model)
+    model = NextSentenceTask(pretrained_bert)
+    if args.checkpoint != 'None':
+        model = torch.load(args.checkpoint)
+
     if args.parallel == 'DDP':
-        model = NextSentenceTask(pretrained_bert).to(device[0])
+        model = model.to(device[0])
         from torch.nn.parallel import DistributedDataParallel as DDP
         model = DDP(model, device_ids=device)
     else:
-        model = NextSentenceTask(pretrained_bert).to(device)
+        model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
 
@@ -255,7 +257,7 @@ def run_main(args, rank=None):
         test_loss = evaluate(test_dataset, model, device, criterion, sep_id, pad_id, args)
         if rank == 0:
             print('=' * 89)
-            print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
+            print('| End of training | test loss {:8.5f} | test ppl {:8.5f}'.format(
                   test_loss, math.exp(test_loss)))
             print('=' * 89)
             print_loss_log(os.environ['SLURM_JOB_ID'] + '_ns_loss.txt', train_loss_log, val_loss_log, test_loss, args)
@@ -264,6 +266,8 @@ def run_main(args, rank=None):
         ###############################################################################
             with open(os.environ['SLURM_JOB_ID'] + '_' + args.save, 'wb') as f:
                 torch.save(model.module.bert_model, f)
+            with open(os.environ['SLURM_JOB_ID'] + '_' + 'full_ns_model.pt', 'wb') as f:
+                torch.save(model.module, f)
     else:
         with open(args.save, 'rb') as f:
             model = torch.load(f)
@@ -271,8 +275,8 @@ def run_main(args, rank=None):
         test_loss = evaluate(test_dataset, model, device,
                              criterion, sep_id, pad_id)
         print('=' * 89)
-        print('| End of training | test loss {:8.5f}'.format(
-            test_loss))
+        print('| End of training | test loss {:8.5f} | test ppl {:8.5f}'.format(
+              test_loss, math.exp(test_loss)))
         print('=' * 89)
         print_loss_log('ns_loss.txt', train_loss_log, val_loss_log, test_loss)
 
@@ -282,8 +286,8 @@ def run_main(args, rank=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Question-Answer fine-tuning task')
-    parser.add_argument('--data', type=str, default='./data/wikitext-2',
-                        help='location of the data corpus')
+    parser.add_argument('--dataset', type=str, default='WikiText103',
+                        help='dataset used for next sentence task')
     parser.add_argument('--lr', type=float, default=5,
                         help='initial learning rate')
     parser.add_argument('--clip', type=float, default=0.25,
@@ -293,13 +297,17 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=6, metavar='N',
                         help='batch size')
     parser.add_argument('--bptt', type=int, default=35,
-                        help='max. sequence length for context + question')
+                        help='max. sequence length for the next-sentence pair')
+    parser.add_argument('--min_sentence_len', type=int, default=1,
+                        help='min. sequence length for the raw text tokens')
     parser.add_argument('--seed', type=int, default=1111,
                         help='random seed')
     parser.add_argument('--cuda', action='store_true',
                         help='use CUDA')
     parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='report interval')
+    parser.add_argument('--checkpoint', type=str, default='None',
+                        help='path to load the checkpoint')
     parser.add_argument('--save', type=str, default='ns_model.pt',
                         help='path to save the final model')
     parser.add_argument('--save-vocab', type=str, default='vocab.pt',

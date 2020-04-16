@@ -507,7 +507,8 @@ class EnWik9(torch.utils.data.Dataset):
 # Set up dataset for book corpus
 ###################################################################
 def BookCorpus(vocab, tokenizer=get_tokenizer("basic_english"),
-               data_select=('train', 'test', 'valid'), removed_tokens=[]):
+               data_select=('train', 'test', 'valid'), removed_tokens=[],
+               min_sentence_len=None):
 
     if isinstance(data_select, str):
         data_select = [data_select]
@@ -531,12 +532,20 @@ def BookCorpus(vocab, tokenizer=get_tokenizer("basic_english"),
         for txt_file in _path[item]:
             with open(txt_file, 'r', encoding="utf8", errors='ignore') as f:
                 for line in f.readlines():
-                    tokens += tokenizer(line.strip())
-        data[item] = [vocab.stoi[token] for token in tokens]
+                    _tokens = tokenizer(line.strip())
+                    if min_sentence_len:
+                        if len(_tokens) >= min_sentence_len:
+                            tokens.append([vocab.stoi[token] for token in _tokens])
+                    else:
+                        tokens += [vocab.stoi[token] for token in _tokens]
+        data[item] = tokens
 
     for key in data_select:
         if data[key] == []:
             raise TypeError('Dataset {} is empty!'.format(key))
-
-    return tuple(LanguageModelingDataset(torch.tensor(data[d]).long(), vocab)
-                 for d in data_select)
+    if min_sentence_len:
+        return tuple(LanguageModelingDataset(data[d], vocab)
+                     for d in data_select)
+    else:
+        return tuple(LanguageModelingDataset(torch.tensor(data[d]).long(), vocab)
+                     for d in data_select)
