@@ -17,8 +17,9 @@ def pad_squad_data(batch):
     ans_pos_list = []
     tok_type = []
 
+    #[TODO] all original three pos from SQuAD dataset
     for item in batch:
-        qa_item = torch.cat((item['question'], torch.tensor([sep_id]),
+        qa_item = torch.cat((torch.tensor([cls_id]), item['question'], torch.tensor([sep_id]),
                              item['context'], torch.tensor([sep_id])))
         if qa_item.size(0) > args.bptt:
             qa_item = qa_item[:args.bptt]
@@ -27,15 +28,15 @@ def pad_squad_data(batch):
                                  torch.tensor([pad_id] * (args.bptt -
                                               qa_item.size(0)))))
         seq_list.append(qa_item)
-        ans_pos_list.append(item['ans_pos'] + item['question'].size(0) + 1)  # 1 for sep
-        tok_type.append(torch.cat((torch.zeros((item['question'].size(0) + 1)),
+        ans_pos_list.append(item['ans_pos'] + item['question'].size(0) + 2)  # 1 for sep and 1 for cls
+        tok_type.append(torch.cat((torch.zeros((item['question'].size(0) + 2)),
                                    torch.ones((args.bptt -
-                                               item['question'].size(0) - 1)))))
+                                               item['question'].size(0) - 2)))))
     return torch.stack(seq_list).long().t().contiguous().to(device), \
         torch.stack(ans_pos_list).to(device), \
         torch.stack(tok_type).long().t().contiguous().to(device)
 
-
+#[TODO] delet because not using
 def pad_squad_data_context_first(batch):
     # Find max length of the mini-batch
     seq_list = []
@@ -83,17 +84,10 @@ def evaluate(data_source):
                             collate_fn=pad_squad_data)
     ans_pred_tokens_samples = []
     vocab = data_source.vocab
-    cls_id = train_dataset.vocab.stoi['<cls>']
 
     with torch.no_grad():
         for idx, (seq_input, ans_pos, tok_type) in enumerate(dataloader):
-            # Add <'cls'> token id to the beginning of seq across batches
-            seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-            tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
-            ans_pos = ans_pos + 1
-
             start_pos, end_pos = model(seq_input, token_type_input=tok_type)
-
             target_start_pos, target_end_pos = ans_pos.split(1, dim=-1)
             target_start_pos = target_start_pos.squeeze(-1)
             target_end_pos = target_end_pos.squeeze(-1)
@@ -105,6 +99,7 @@ def evaluate(data_source):
             start_pos = nn.functional.softmax(start_pos, dim=1).argmax(1)
             end_pos = nn.functional.softmax(end_pos, dim=1).argmax(1)
 
+            #[TODO] remove '<unk>', '<cls>', '<pad>', '<MASK>' from ans_tokens and pred_tokens
             # Go through batch and convert ids to tokens list
             seq_input = seq_input.transpose(0, 1)  # convert from (S, N) to (N, S)
             for num in range(0, seq_input.size(0)):
@@ -135,15 +130,9 @@ def train():
     batch_size = args.batch_size
     dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                             collate_fn=pad_squad_data)
-    cls_id = train_dataset.vocab.stoi['<cls>']
     train_loss_log.append(0.0)
 
     for idx, (seq_input, ans_pos, tok_type) in enumerate(dataloader):
-        # Add <'cls'> token id to the beginning of seq across batches
-        seq_input = torch.cat((torch.tensor([[cls_id] * seq_input.size(1)]).long().to(device), seq_input))
-        tok_type = torch.cat((torch.tensor([[0] * tok_type.size(1)]).long().to(device), tok_type))
-        ans_pos = ans_pos + 1
-
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         optimizer.zero_grad()
@@ -207,6 +196,7 @@ if __name__ == "__main__":
                         help='upper epoch limit')
     parser.add_argument('--batch_size', type=int, default=6, metavar='N',
                         help='batch size')
+    #[TODO] increase bptt to 200
     parser.add_argument('--bptt', type=int, default=35,
                         help='max. sequence length for context + question')
     parser.add_argument('--seed', type=int, default=1111,
@@ -242,13 +232,18 @@ if __name__ == "__main__":
             torch.save(vocab, f)
     pad_id = vocab.stoi['<pad>']
     sep_id = vocab.stoi['<sep>']
+    # [DONE] add cls_id and attach to the beginning of sequence
+    cls_id = vocab.stoi['<cls>']
 
+    # [TODO] switch to SQuAD 2.0
     train_dataset, dev_dataset = SQuAD(vocab=vocab)
 
     # Remove data with 'question' + 'context' > args.bptt or
+    #[TODO] remove the cases with pos larger than args.bptt
     def clean_data(data):
         _data = []
         for item in data:
+            #[TODO] remove the cases with pos larger than args.bptt
             if item['ans_pos'][1] + item['question'].size(0) + 2 >= args.bptt: # 2 for '<cls>' '<sep>'
                 continue
             _data.append(item)
