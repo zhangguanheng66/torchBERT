@@ -41,44 +41,10 @@ def pad_squad_data(batch):
         _ans_pos_list, \
         torch.stack(tok_type).long().t().contiguous().to(device)
 
-#[TODO] delet because not using
-def pad_squad_data_context_first(batch):
-    # Find max length of the mini-batch
-    seq_list = []
-    ans_pos_list = []
-    seq_len = []
-
-    _batch = []
-    for item in batch:
-        if item['question'].size(0) >= args.bptt:
-            continue
-        if item['context'].size(0) + item['question'].size(0) > args.bptt:
-            item['context'] = item['context'][:(args.bptt - item['question'].size(0))]
-        if item['ans_pos'][1] >= item['context'].size(0):
-            continue
-        _batch.append(item)
-
-    for item in _batch:
-        seq_list.append(torch.cat((item['context'], item['question'])))
-        seq_len.append(seq_list[-1].size(0))
-        ans_pos_list.append(item['ans_pos'])
-
-    max_l = max(seq_len)
-    padded = torch.stack([torch.cat((txt,
-                          torch.tensor([pad_id] * (max_l - len(txt))).long()))
-                          for txt in seq_list]).t().contiguous()
-    tok_type = torch.stack([torch.cat((torch.zeros((item['context'].size(0))),
-                                       torch.ones((max_l -
-                                                   item['context'].size(0)))))
-                            for item in _batch]).long().t().contiguous()
-    return padded.to(device), \
-        torch.stack(ans_pos_list).to(device), \
-        tok_type.to(device)
-
-
 ###############################################################################
 # Evaluating code
 ###############################################################################
+
 
 def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
