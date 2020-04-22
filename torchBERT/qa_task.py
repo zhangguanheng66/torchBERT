@@ -117,9 +117,6 @@ def train():
         target_start_pos, target_end_pos = ans_pos[0].to(device).split(1, dim=-1)
         target_start_pos = target_start_pos.squeeze(-1)
         target_end_pos = target_end_pos.squeeze(-1)
-#        print("ans_pos[0].size(), target_start_pos.size(), target_end_pos.size(): ", ans_pos[0].size(), target_start_pos.size(), target_end_pos.size())
-#        print("start_pos.size(), end_pos.size(): ", start_pos.size(), end_pos.size())
-#        print('start_pos.size(), target_start_pos.size(), end_pos.size(), target_end_pos.size()', start_pos.size(), target_start_pos.size(), end_pos.size(), target_end_pos.size())
         loss = (criterion(start_pos, target_start_pos) + criterion(end_pos, target_end_pos)) / 2
         loss.backward()
 
@@ -131,22 +128,6 @@ def train():
         total_loss += loss.item()
 
         if idx % args.log_interval == 0 and idx > 0:
-#            print('criterion(start_pos, target_start_pos), criterion(end_pos, target_end_pos):' + '\n')
-#            print(criterion(start_pos, target_start_pos), criterion(end_pos, target_end_pos))
-#
-#            toks = []
-#            types = []
-#            target_ans = []
-#            ans = []
-#            for _id in range(seq_input.size(0)):
-#                toks.append(train_dataset.vocab.itos[int(seq_input[_id][0])])
-#                types.append(int(tok_type[_id][0]))
-#            for _id in range(int(target_start_pos[0]), int(target_end_pos[0]) + 1):
-#                target_ans.append(toks[_id])
-#            print('toks, types, toks[int(target_start_pos[0])], toks[int(target_end_pos[0])]:', '\n',
-#                  toks, types, toks[int(target_start_pos[0])],
-#                  toks[int(target_end_pos[0])])
-#
             cur_loss = total_loss / args.log_interval
             train_loss_log[-1] = cur_loss
             elapsed = time.time() - start_time
