@@ -56,13 +56,15 @@ class QuestionAnswerDataset(torch.utils.data.Dataset):
 
 def create_data_from_iterator(vocab, processed_data, tokenizer):
     for items in processed_data:
-        ans_start_idx = items['answer_start']
-        ans_start_token_id = len(tokenizer(items['context'][:ans_start_idx]))
-        ans_end_token_id = ans_start_token_id + len(tokenizer(items['answers'])) - 1
+        _ans = []
+        for idx in range(len(items['answer_start'])):
+            ans_start_idx = items['answer_start'][idx]
+            ans_start_token_id = len(tokenizer(items['context'][:ans_start_idx]))
+            ans_end_token_id = ans_start_token_id + len(tokenizer(items['answers'][idx])) - 1
+            _ans.append((iter(vocab[token] for token in tokenizer(items['answers'][idx])), \
+                        ans_start_token_id, ans_end_token_id))
         yield iter(vocab[token] for token in tokenizer(items['context'])), \
-            iter(vocab[token] for token in tokenizer(items['question'])), \
-            iter(vocab[token] for token in tokenizer(items['answers'])), \
-            ans_start_token_id, ans_end_token_id
+            iter(vocab[token] for token in tokenizer(items['question'])), _ans
 
 
 def squad_iterator(processed_data, tokenizer):
@@ -79,8 +81,8 @@ def process_raw_json_data(raw_json_data):
             for layer3 in layer2['qas']:
                 processed.append({'context': layer2['context'],
                                   'question': layer3['question'],
-                                  'answers': layer3['answers'][0]['text'],
-                                  'answer_start': layer3['answers'][0]['answer_start']})
+                                  'answers': [item['text'] for item in layer3['answers']],
+                                  'answer_start': [item['answer_start'] for item in layer3['answers']]})
     return processed
 
 
@@ -118,15 +120,17 @@ def _setup_qa_datasets(dataset_name, tokenizer=get_tokenizer("basic_english"),
     for item in data_select:
         data_iter = create_data_from_iterator(vocab, squad_data[item], tokenizer)
         tensor_data = []
-        for context, question, answers, ans_start_id, ans_end_id in data_iter:
-            tensor_data.append({'context':
-                                torch.tensor([token_id for token_id in context]).long(),
-                                'question':
-                                torch.tensor([token_id for token_id in question]).long(),
-                                'answers':
-                                torch.tensor([token_id for token_id in answers]).long(),
-                                'ans_pos':
-                                torch.tensor([ans_start_id, ans_end_id]).long()})
+        for context, question, _ans in data_iter:
+            iter_data = {'context':
+                         torch.tensor([token_id for token_id in context]).long(),
+                         'question':
+                         torch.tensor([token_id for token_id in question]).long(),
+                         'answers': [],
+                         'ans_pos': []}
+            for (_answer, ans_start_id, ans_end_id) in _ans:
+                iter_data['answers'].append(torch.tensor([token_id for token_id in _answer]).long())
+                iter_data['ans_pos'].append(torch.tensor([ans_start_id, ans_end_id]).long())
+            tensor_data.append(iter_data)
         data[item] = tensor_data
 
     return tuple(QuestionAnswerDataset(data[item], vocab) for item in data_select)

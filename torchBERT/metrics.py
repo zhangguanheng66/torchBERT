@@ -6,11 +6,11 @@ import string
 def compute_qa_exact(ans_pred_tokens_samples):
 
     '''
-        Input: ans_pred_tokens_samples: [(ans1_tokens, pred1_tokens),
-                                         (ans2_tokens, pred2_tokens),
+        Input: ans_pred_tokens_samples: [([ans1_tokens_candidate1, ans1_tokens_candidate2], pred1_tokens),
+                                         ([ans2_tokens_candidate1, ans2_tokens_candidate2], pred2_tokens),
                                          ...
-                                         (ansn_tokens, predn_tokens)]
-        ans1_tokens = ['this', 'is', 'an', 'sample', 'example']
+                                         ([ansn_tokens_candidate1, ansn_tokens_candidate2], predn_tokens)]
+        ans1_tokens_candidate1 = ['this', 'is', 'an', 'sample', 'example']
         Output: exact score of the samples
     '''
 
@@ -31,20 +31,23 @@ def compute_qa_exact(ans_pred_tokens_samples):
 
     exact_scores = []
     for (ans_tokens, pred_tokens) in ans_pred_tokens_samples:
-        ans_str = " ".join(ans_tokens)
         pred_str = " ".join(pred_tokens)
-        exact_scores.append(int(normalize_txt(ans_str) == normalize_txt(pred_str)))
+        candidate_score = []
+        for item in ans_tokens:
+            ans_str = " ".join(item)
+            candidate_score.append(int(normalize_txt(ans_str) == normalize_txt(pred_str)))
+        exact_scores.append(max(candidate_score))
     return 100.0 * sum(exact_scores) / len(exact_scores)
 
 
 def compute_qa_f1(ans_pred_tokens_samples):
 
     '''
-        Input: ans_pred_tokens_samples: [(ans1_tokens, pred1_tokens),
-                                         (ans2_tokens, pred2_tokens),
+        Input: ans_pred_tokens_samples: [([ans1_tokens_candidate1, ans1_tokens_candidate2], pred1_tokens),
+                                         ([ans2_tokens_candidate1, ans2_tokens_candidate2], pred2_tokens),
                                          ...
-                                         (ansn_tokens, predn_tokens)]
-        ans1_tokens = ['this', 'is', 'an', 'sample', 'example']
+                                         ([ansn_tokens_candidate1, ansn_tokens_candidate2], predn_tokens)]
+        ans1_tokens_candidate1 = ['this', 'is', 'an', 'sample', 'example']
         Output: f1 score of the samples
     '''
     def sample_f1(ans_tokens, pred_tokens):
@@ -62,5 +65,8 @@ def compute_qa_f1(ans_pred_tokens_samples):
 
     f1_scores = []
     for (ans_tokens, pred_tokens) in ans_pred_tokens_samples:
-        f1_scores.append(sample_f1(ans_tokens, pred_tokens))
+        candidate_score = []
+        for item in ans_tokens:
+            candidate_score.append(sample_f1(item, pred_tokens))
+        f1_scores.append(max(candidate_score))
     return 100.0 * sum(f1_scores) / len(f1_scores)

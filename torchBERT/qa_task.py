@@ -28,12 +28,17 @@ def pad_squad_data(batch):
                                  torch.tensor([pad_id] * (args.bptt -
                                               qa_item.size(0)))))
         seq_list.append(qa_item)
-        ans_pos_list.append(item['ans_pos'] + item['question'].size(0) + 2)  # 1 for sep and 1 for cls
+        pos_list = [pos + item['question'].size(0) + 2 for pos in item['ans_pos']]  # 1 for sep and 1 for cls
+        ans_pos_list.append(pos_list)
         tok_type.append(torch.cat((torch.zeros((item['question'].size(0) + 2)),
                                    torch.ones((args.bptt -
                                                item['question'].size(0) - 2)))))
+
+    _ans_pos_list = []
+    for pos in zip(*ans_pos_list):
+        _ans_pos_list.append(torch.stack(list(pos)))
     return torch.stack(seq_list).long().t().contiguous().to(device), \
-        torch.stack(ans_pos_list).to(device), \
+        _ans_pos_list, \
         torch.stack(tok_type).long().t().contiguous().to(device)
 
 #[TODO] delet because not using
@@ -86,14 +91,17 @@ def evaluate(data_source):
     vocab = data_source.vocab
 
     with torch.no_grad():
-        for idx, (seq_input, ans_pos, tok_type) in enumerate(dataloader):
+        for idx, (seq_input, ans_pos_list, tok_type) in enumerate(dataloader):
             start_pos, end_pos = model(seq_input, token_type_input=tok_type)
-            target_start_pos, target_end_pos = ans_pos.split(1, dim=-1)
-            target_start_pos = target_start_pos.squeeze(-1)
-            target_end_pos = target_end_pos.squeeze(-1)
+            target_start_pos, target_end_pos = [], []
+            for item in ans_pos_list:
+                _target_start_pos, _target_end_pos = item.to(device).split(1, dim=-1)
+                target_start_pos.append(_target_start_pos.squeeze(-1))
+                target_end_pos.append(_target_end_pos.squeeze(-1))
 
-            loss = (criterion(start_pos, target_start_pos)
-                    + criterion(end_pos, target_end_pos)) / 2
+            # in dev, pos come with three set. Use the first one to calculate loss here
+            loss = (criterion(start_pos, target_start_pos[0])
+                    + criterion(end_pos, target_end_pos[0])) / 2
             total_loss += loss.item()
 
             start_pos = nn.functional.softmax(start_pos, dim=1).argmax(1)
@@ -105,9 +113,11 @@ def evaluate(data_source):
             for num in range(0, seq_input.size(0)):
                 if int(start_pos[num]) > int(end_pos[num]):
                     continue
-                ans_tokens = [vocab.itos[int(seq_input[num][i])]
-                              for i in range(target_start_pos[num],
-                                             target_end_pos[num] + 1)]
+                ans_tokens = []
+                for _idx in range(len(target_end_pos)):
+                    ans_tokens.append([vocab.itos[int(seq_input[num][i])]
+                                       for i in range(target_start_pos[_idx][num],
+                                                      target_end_pos[_idx][num] + 1)])
                 pred_tokens = [vocab.itos[int(seq_input[num][i])]
                                for i in range(start_pos[num],
                                               end_pos[num] + 1)]
@@ -138,10 +148,11 @@ def train():
         optimizer.zero_grad()
         start_pos, end_pos = model(seq_input, token_type_input=tok_type)
 
-        target_start_pos, target_end_pos = ans_pos.split(1, dim=-1)
+        target_start_pos, target_end_pos = ans_pos[0].to(device).split(1, dim=-1)
         target_start_pos = target_start_pos.squeeze(-1)
         target_end_pos = target_end_pos.squeeze(-1)
-
+#        print("ans_pos[0].size(), target_start_pos.size(), target_end_pos.size(): ", ans_pos[0].size(), target_start_pos.size(), target_end_pos.size())
+#        print("start_pos.size(), end_pos.size(): ", start_pos.size(), end_pos.size())
 #        print('start_pos.size(), target_start_pos.size(), end_pos.size(), target_end_pos.size()', start_pos.size(), target_start_pos.size(), end_pos.size(), target_end_pos.size())
         loss = (criterion(start_pos, target_start_pos) + criterion(end_pos, target_end_pos)) / 2
         loss.backward()
@@ -243,10 +254,13 @@ if __name__ == "__main__":
     def clean_data(data):
         _data = []
         for item in data:
-            #[TODO] remove the cases with pos larger than args.bptt
-            if item['ans_pos'][1] + item['question'].size(0) + 2 >= args.bptt: # 2 for '<cls>' '<sep>'
-                continue
-            _data.append(item)
+            right_length = True
+            for _idx in range(len(item['ans_pos'])):
+                #[TODO] remove the cases with pos larger than args.bptt
+                if item['ans_pos'][_idx][1] + item['question'].size(0) + 2 >= args.bptt: # 2 for '<cls>' '<sep>'
+                    right_length = False
+            if right_length:
+                _data.append(item)
         return _data
     train_dataset.data = clean_data(train_dataset.data)
     dev_dataset.data = clean_data(dev_dataset.data)
