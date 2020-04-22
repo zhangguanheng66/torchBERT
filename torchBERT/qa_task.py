@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchtext
-from data import SQuAD
+from data import SQuAD1
 from model import QuestionAnswerTask
 from metrics import compute_qa_exact, compute_qa_f1
 from utils import print_loss_log
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     try:
         vocab = torch.load(args.save_vocab)
     except:
-        train_dataset, dev_dataset = SQuAD()
+        train_dataset, dev_dataset = SQuAD1()
         old_vocab = train_dataset.vocab
         vocab = torchtext.vocab.Vocab(counter=old_vocab.freqs,
                                       specials=['<unk>', '<pad>', '<MASK>'])
@@ -193,7 +193,7 @@ if __name__ == "__main__":
     cls_id = vocab.stoi['<cls>']
 
     # [TODO] switch to SQuAD 2.0
-    train_dataset, dev_dataset = SQuAD(vocab=vocab)
+    train_dataset, dev_dataset = SQuAD1(vocab=vocab)
 
     # Remove data with 'question' + 'context' > args.bptt or
     #[TODO] remove the cases with pos larger than args.bptt

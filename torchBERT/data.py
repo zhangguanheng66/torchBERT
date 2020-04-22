@@ -17,6 +17,9 @@ URLS = {
     'SQuAD1':
         ['https://rajpurkar.github.io/SQuAD-explorer/dataset/train-v1.1.json',
          'https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v1.1.json'],
+    'SQuAD2':
+        ['https://rajpurkar.github.io/SQuAD-explorer/dataset/train-v2.0.json',
+         'https://rajpurkar.github.io/SQuAD-explorer/dataset/dev-v2.0.json'],
     'WikiText2':
         'https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-2-v1.zip',
     'WikiText103':
@@ -97,7 +100,7 @@ def _setup_qa_datasets(dataset_name, tokenizer=get_tokenizer("basic_english"),
 
     extracted_files = []
     select_to_index = {'train': 0, 'dev': 1}
-    extracted_files = [download_from_url(URLS['SQuAD1'][select_to_index[key]],
+    extracted_files = [download_from_url(URLS[dataset_name][select_to_index[key]],
                                          root=root) for key in data_select]
 
     squad_data = {}
@@ -136,8 +139,12 @@ def _setup_qa_datasets(dataset_name, tokenizer=get_tokenizer("basic_english"),
     return tuple(QuestionAnswerDataset(data[item], vocab) for item in data_select)
 
 
-def SQuAD(*args, **kwargs):
-    return _setup_qa_datasets(*(('SQuAD',) + args), **kwargs)
+def SQuAD1(*args, **kwargs):
+    return _setup_qa_datasets(*(('SQuAD1',) + args), **kwargs)
+
+
+def SQuAD2(*args, **kwargs):
+    return _setup_qa_datasets(*(('SQuAD2',) + args), **kwargs)
 
 
 ###################################################################
