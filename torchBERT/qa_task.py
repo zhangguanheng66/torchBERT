@@ -17,7 +17,6 @@ def pad_squad_data(batch):
     ans_pos_list = []
     tok_type = []
 
-    #[TODO] all original three pos from SQuAD dataset
     for item in batch:
         qa_item = torch.cat((torch.tensor([cls_id]), item['question'], torch.tensor([sep_id]),
                              item['context'], torch.tensor([sep_id])))
