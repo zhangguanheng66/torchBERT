@@ -77,7 +77,10 @@ def evaluate(data_source):
             seq_input = seq_input.transpose(0, 1)  # convert from (S, N) to (N, S)
             for num in range(0, seq_input.size(0)):
                 if int(start_pos[num]) > int(end_pos[num]):
-                    continue
+                    continue  # start pos is in front of end pos
+                # [TODO] Remove this check
+                if int(tok_type[int(start_pos[num])][num]) == 0 or int(tok_type[int(end_pos[num])][num]) == 0:
+                    continue  # start/end pos in question span
                 ans_tokens = []
                 for _idx in range(len(target_end_pos)):
                     ans_tokens.append([vocab.itos[int(seq_input[num][i])]
