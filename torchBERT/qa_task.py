@@ -230,7 +230,8 @@ if __name__ == "__main__":
     lr = args.lr
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
-    best_val_loss = None
+#    best_val_loss = None
+    best_f1 = None
     train_loss_log, val_loss_log = [], []
 
     for epoch in range(1, args.epochs + 1):
@@ -245,10 +246,12 @@ if __name__ == "__main__":
                                    val_loss, val_exact, val_f1))
         print('-' * 89)
         # Save the model if the validation loss is the best we've seen so far.
-        if not best_val_loss or val_loss < best_val_loss:
+#        if not best_val_loss or val_loss < best_val_loss:
+        if best_f1 is None or val_f1 > best_f1:
             with open(args.save, 'wb') as f:
                 torch.save(model, f)
-            best_val_loss = val_loss
+#            best_val_loss = val_loss
+            best_f1 = val_f1
         else:
             scheduler.step()
 

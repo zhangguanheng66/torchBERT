@@ -62,10 +62,14 @@ def create_data_from_iterator(vocab, processed_data, tokenizer):
         _ans = []
         for idx in range(len(items['answer_start'])):
             ans_start_idx = items['answer_start'][idx]
-            ans_start_token_id = len(tokenizer(items['context'][:ans_start_idx]))
-            ans_end_token_id = ans_start_token_id + len(tokenizer(items['answers'][idx])) - 1
-            _ans.append((iter(vocab[token] for token in tokenizer(items['answers'][idx])), \
-                        ans_start_token_id, ans_end_token_id))
+            if ans_start_idx == -1:  # No answer for this sample
+                _ans.append((iter(vocab[token] for token in tokenizer(items['answers'][idx])),
+                             ans_start_idx, ans_start_idx))
+            else:
+                ans_start_token_id = len(tokenizer(items['context'][:ans_start_idx]))
+                ans_end_token_id = ans_start_token_id + len(tokenizer(items['answers'][idx])) - 1
+                _ans.append((iter(vocab[token] for token in tokenizer(items['answers'][idx])),
+                             ans_start_token_id, ans_end_token_id))
         yield iter(vocab[token] for token in tokenizer(items['context'])), \
             iter(vocab[token] for token in tokenizer(items['question'])), _ans
 
@@ -86,6 +90,9 @@ def process_raw_json_data(raw_json_data):
                                   'question': layer3['question'],
                                   'answers': [item['text'] for item in layer3['answers']],
                                   'answer_start': [item['answer_start'] for item in layer3['answers']]})
+                if len(processed[-1]['answers']) == 0:
+                    processed[-1]['answers'] = [""]
+                    processed[-1]['answer_start'] = [-1]
     return processed
 
 
@@ -339,6 +346,7 @@ def _setup_ns(dataset_name, tokenizer=get_tokenizer("basic_english"),
     else:
         return tuple(LanguageModelingDataset(data[d], vocab)
                      for d in data_select)
+
 
 def WikiText103(*args, **kwargs):
     """ Defines WikiText103 datasets.
