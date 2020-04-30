@@ -72,15 +72,12 @@ def evaluate(data_source):
             start_pos = nn.functional.softmax(start_pos, dim=1).argmax(1)
             end_pos = nn.functional.softmax(end_pos, dim=1).argmax(1)
 
-            #[TODO] remove '<unk>', '<cls>', '<pad>', '<MASK>' from ans_tokens and pred_tokens
+            # [TODO] remove '<unk>', '<cls>', '<pad>', '<MASK>' from ans_tokens and pred_tokens
             # Go through batch and convert ids to tokens list
             seq_input = seq_input.transpose(0, 1)  # convert from (S, N) to (N, S)
             for num in range(0, seq_input.size(0)):
                 if int(start_pos[num]) > int(end_pos[num]):
                     continue  # start pos is in front of end pos
-                # [TODO] Remove this check
-                if int(tok_type[int(start_pos[num])][num]) == 0 or int(tok_type[int(end_pos[num])][num]) == 0:
-                    continue  # start/end pos in question span
                 ans_tokens = []
                 for _idx in range(len(target_end_pos)):
                     ans_tokens.append([vocab.itos[int(seq_input[num][i])]
@@ -156,7 +153,7 @@ if __name__ == "__main__":
                         help='upper epoch limit')
     parser.add_argument('--batch_size', type=int, default=6, metavar='N',
                         help='batch size')
-    #[TODO] increase bptt to 200
+    # [TODO] increase bptt to 200
     parser.add_argument('--bptt', type=int, default=35,
                         help='max. sequence length for context + question')
     parser.add_argument('--seed', type=int, default=1111,
